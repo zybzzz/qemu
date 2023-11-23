@@ -110,3 +110,6 @@ config SPIKE
 
 config NEMU
     bool
+    select SERIAL
+    select SIFIVE_PLIC
+    select XILINX

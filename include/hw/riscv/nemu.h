@@ -19,6 +19,7 @@ struct NEMUState{
     /*< public >*/
     RISCVHartArrayState soc[NEMU_CPUS_MAX];
 
+    DeviceState *irqchip[NEMU_CPUS_MAX];
 };
 
 
