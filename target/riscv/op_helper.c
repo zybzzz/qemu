@@ -24,6 +24,19 @@
 #include "exec/exec-all.h"
 #include "exec/cpu_ldst.h"
 #include "exec/helper-proto.h"
+#include "sysemu/runstate.h"
+
+
+void helper_nemu_trap(CPURISCVState *env,target_ulong a0){
+    if (a0==0x100) {
+        env->mie=(env->mie&(~(1<<7)));
+        env->mie=(env->mie&(~(1<<5)));
+    }else if (a0==0x101) {
+    }else if (a0==0x102) {
+    }else {
+        qemu_system_shutdown_request(SHUTDOWN_CAUSE_HOST_QMP_QUIT);
+    }
+}
 
 /* Exceptions processing helpers */
 G_NORETURN void riscv_raise_exception(CPURISCVState *env,

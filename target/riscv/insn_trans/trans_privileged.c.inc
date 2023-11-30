@@ -18,6 +18,12 @@
  * this program.  If not, see <http://www.gnu.org/licenses/>.
  */
 
+static bool trans_nemu_trap(DisasContext *ctx, arg_nemu_trap *a)
+{
+    gen_helper_nemu_trap(cpu_env,cpu_gpr[10]);
+    return true;
+}
+
 static bool trans_ecall(DisasContext *ctx, arg_ecall *a)
 {
     /* always generates U-level ECALL, fixed in do_interrupt handler */
