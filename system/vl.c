@@ -135,6 +135,8 @@
 #include "qemu/guest-random.h"
 #include "qemu/keyval.h"
 
+#include "checkpoint/checkpoint.h"
+
 #define MAX_VIRTIO_CONSOLES 1
 
 typedef struct BlockdevOptionsQueueEntry {
@@ -193,6 +195,23 @@ static int default_cdrom = 1;
 static int default_sdcard = 1;
 static int default_vga = 1;
 static int default_net = 1;
+
+
+/* -------------------------------------------------- arg for checkpoint -----------------------------------*/
+const char * simpoints_dir = NULL;
+const char * output_base_dir = NULL;
+const char * config_name = NULL;
+const char * workload_name = NULL;
+bool checkpoint_taking = false;
+bool xpoint_profiling_started = false;
+int profiling_state = NoCheckpoint;
+int checkpoint_state = NoCheckpoint;
+uint64_t checkpoint_interval = 0;
+FILE * simpoints_file = NULL;
+FILE * weights_file = NULL;
+Serializer serializer;
+PathManger pathmanger;
+/* ------------------------------------------------------ end --------------------------------------------*/
 
 static const struct {
     const char *driver;
@@ -2747,6 +2766,100 @@ void qmp_x_exit_preconfig(Error **errp)
     }
 }
 
+
+static void init_path_manager(void){
+    assert(output_base_dir);
+    strcpy(pathmanger.statsBaseDir, output_base_dir);
+    assert(config_name);
+    strcpy(pathmanger.configName, config_name);
+    assert(workload_name);
+    strcpy(pathmanger.workloadName, workload_name);
+    pathmanger.cptID = -1;
+
+    // if (cpt_id != -1) {
+    //     cptID = cpt_id;
+    // }
+
+    if (checkpoint_state == SimpointCheckpointing) {
+        pathmanger.cptID = 0;
+    }
+
+    strcpy(pathmanger.workloadPath, output_base_dir);
+    strcat(pathmanger.workloadPath, "/");
+    strcat(pathmanger.workloadPath, config_name);
+    strcat(pathmanger.workloadPath, "/");
+    strcat(pathmanger.workloadPath, workload_name);
+    info_report("Cpt id: %i", pathmanger.cptID);
+    if (checkpoint_state == SimpointCheckpointing) {
+        assert(simpoints_dir);
+        strcpy(pathmanger.simpointPath, simpoints_dir);
+        strcat(pathmanger.simpointPath, "/");
+        strcat(pathmanger.simpointPath, workload_name);
+        strcat(pathmanger.simpointPath, "/");
+    }    
+    char output_path[STRING_LEN], str_temp[STRING_LEN];
+    strcpy(output_path, pathmanger.workloadPath);
+    int temp = pathmanger.cptID , len = 0, i;
+    while(temp / 10){
+        len++;
+        temp /= 10;
+    }
+    temp = pathmanger.cptID;
+    for(i = len; i >= 0; i--){
+        str_temp[i] = temp % 10;
+        temp /= 10;
+    }
+    str_temp[len + 1] = '/';
+    str_temp[len + 2] = '\0';
+    strcat(output_path, str_temp);
+    strcpy(pathmanger.outputPath, output_path);
+    struct  stat st;
+    if(stat(pathmanger.outputPath, &st) != 0){
+        if(mkdir(pathmanger.outputPath, 0777) == 0){
+            info_report("Created %s\n", pathmanger.outputPath);
+        }
+    }
+}
+
+static void init_serializer(void){
+    if  (checkpoint_state == SimpointCheckpointing) {
+        assert(checkpoint_interval);
+        serializer.intervalSize = checkpoint_interval;
+        info_report("Taking simpoint checkpionts with profiling interval %lu",
+            checkpoint_interval);
+
+        char filea[200];
+        strcpy(filea, pathmanger.simpointPath);
+        strcat(filea, "simpoints0");
+        simpoints_file = fopen(filea, "r");
+        strcpy(filea, pathmanger.simpointPath);
+        strcat(filea, "weights0");
+        weights_file = fopen(filea, "r");
+        assert(simpoints_file);
+        assert(weights_file);
+
+        uint64_t simpoint_location, simpoint_id, weight_id;
+        double weight;
+        // if(fread(filea, 20, 1, simpoints_file)){
+
+        // }
+        while (fscanf(simpoints_file, "%lu %lu\n", &simpoint_location, &simpoint_id) != EOF)
+        {
+            assert(fscanf(weights_file, "%lf %lu\n", &weight, &weight_id));
+            assert(weight_id == simpoint_id);
+            serializer.simpoints[simpoint_id] = simpoint_location;
+            serializer.weights[weight_id] = weight;
+            info_report("Simpoint %lu: @ %lu, weight: %f", simpoint_id, simpoint_location, weight);
+        }
+    } else if (checkpoint_state==UniformCheckpointing||checkpoint_state==ManualUniformCheckpointing) {
+        assert(checkpoint_interval);
+        serializer.intervalSize = checkpoint_interval;
+        info_report("Taking uniform checkpionts with interval %lu", checkpoint_interval);
+        serializer.nextUniformPoint = serializer.intervalSize;
+  }
+}
+
+
 void qemu_init(int argc, char **argv)
 {
     QemuOpts *opts;
@@ -3639,6 +3752,33 @@ void qemu_init(int argc, char **argv)
                 break;
             }
 #endif /* CONFIG_POSIX */
+            case QEMU_OPTION_simpoint_dir:
+                {
+                    simpoints_dir = optarg;
+                    checkpoint_state = SimpointCheckpointing;
+                    break;
+                }
+            case QEMU_OPTION_workload_name:
+                {
+                    workload_name = optarg;
+                    checkpoint_state = SimpointCheckpointing;
+                    break;
+                }
+            case QEMU_OPTION_interval:
+                {
+                    checkpoint_interval = atoi(optarg);
+                    break;
+                }
+            case QEMU_OPTION_output_base_dir:
+                {
+                    output_base_dir = optarg;
+                    break;
+                }
+            case QEMU_OPTION_config_name:
+                {
+                    config_name = optarg;
+                    break;
+                }
 
             default:
                 error_report("Option not supported in this build");
@@ -3646,6 +3786,19 @@ void qemu_init(int argc, char **argv)
             }
         }
     }
+
+
+    /*
+     *
+     * simpoint file init
+     */
+    bool output_features_enabled = checkpoint_state!=NoCheckpoint || profiling_state == SimpointProfiling;
+    if (output_features_enabled) {
+        init_path_manager();
+        init_serializer();
+    }
+
+
     /*
      * Clear error location left behind by the loop.
      * Best done right after the loop.  Do not insert code here!

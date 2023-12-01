@@ -170,6 +170,53 @@ SRST
     Define an SGX EPC section.
 ERST
 
+
+
+DEF("cpt-interval", HAS_ARG, QEMU_OPTION_interval,
+    "cpt interval: the profiling period for simpoint; the checkpoint interval for uniform cpt\n",
+    QEMU_ARCH_ALL)
+
+SRST
+``cpt interval: the profiling period for simpoint; the checkpoint interval for uniform cpt\n``
+    Define an SGX EPC section.
+ERST
+
+DEF("simpoint_dir", HAS_ARG, QEMU_OPTION_simpoint_dir,
+    "simpoints dir\n",
+    QEMU_ARCH_ALL)
+
+SRST
+``cpt interval: the profiling period for simpoint; the checkpoint interval for uniform cpt\n``
+    Define an SGX EPC section.
+ERST
+
+DEF("workload_name", HAS_ARG, QEMU_OPTION_workload_name,
+    "workload_name\n",
+    QEMU_ARCH_ALL)
+
+SRST
+``workload_name\n``
+    Define an SGX EPC section.
+ERST
+
+DEF("output_base_dir", HAS_ARG, QEMU_OPTION_output_base_dir,
+    "store simpoint bbv, cpts, and stats in STAT_DIR\n",
+    QEMU_ARCH_ALL)
+
+SRST
+``store simpoint bbv, cpts, and stats in STAT_DIR\n``
+    Define an SGX EPC section.
+ERST
+
+DEF("config-name", HAS_ARG, QEMU_OPTION_config_name,
+    "running configuration\n",
+    QEMU_ARCH_ALL)
+
+SRST
+``running configuration\n``
+    Define an SGX EPC section.
+ERST
+
 DEF("cpu", HAS_ARG, QEMU_OPTION_cpu,
     "-cpu cpu        select CPU ('-cpu help' for list)\n", QEMU_ARCH_ALL)
 SRST
