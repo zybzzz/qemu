@@ -35,29 +35,27 @@ enum ProfilingState{
     SimpointProfiling,
 };
 
-struct PathManger{
-    char statsBaseDir[STRING_LEN];
-    char configName[STRING_LEN];
-    char workloadName[STRING_LEN];
-    int cptID;
-    char workloadPath[STRING_LEN];
-    char outputPath[STRING_LEN];
-    char simpointPath[STRING_LEN];
-};
+typedef struct PathManager{
+    GString *base_dir;
+    GString *workload_name;
+    GString *config_name;
+    GString *output_path;
 
-struct Serializer{
-    uint64_t intervalSize;
+    GString *simpoint_path;
+
+    GList *checkpoint_path_list;
+}PathManager;
+
+typedef struct Serializer{
+    uint64_t cpt_interval;
     uint64_t nextUniformPoint;
-    uint64_t simpoints[SIMPOINT_IDX_MAX];
-    double weights[SIMPOINT_IDX_MAX];
-};
-
-typedef struct PathManger PathManger;
-typedef struct Serializer Serializer;
+    GList *cpt_instructions;
+    GList *weights;
+}Serializer;
 
 extern int checkpoint_state;
 extern Serializer serializer;
-extern PathManger pathmanger;
+extern PathManager path_manager;
 
 bool try_take_cpt(uint64_t icount);
 #endif

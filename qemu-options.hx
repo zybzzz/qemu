@@ -181,8 +181,8 @@ SRST
     Define an SGX EPC section.
 ERST
 
-DEF("simpoint_dir", HAS_ARG, QEMU_OPTION_simpoint_dir,
-    "simpoints dir\n",
+DEF("simpoint_path", HAS_ARG, QEMU_OPTION_simpoint_path,
+    "simpoints path\n",
     QEMU_ARCH_ALL)
 
 SRST
