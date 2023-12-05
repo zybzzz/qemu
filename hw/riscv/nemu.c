@@ -28,6 +28,7 @@
 #include "hw/boards.h"
 #include "hw/loader.h"
 #include "hw/sysbus.h"
+#include "qemu/typedefs.h"
 #include "qemu/units.h"
 #include "target/riscv/cpu.h"
 #include "hw/riscv/riscv_hart.h"
@@ -180,14 +181,24 @@ static void nemu_machine_init(MachineState *machine)
 
         /* Core Local Interruptor (timer and IPI) for each socket */
         /* Per-socket SiFive CLINT */
-        riscv_aclint_swi_create(
-            memmap[NEMU_CLINT].base + i * memmap[NEMU_CLINT].size,
-            base_hartid, hart_count, false);
+//        riscv_aclint_swi_create(
+//            memmap[NEMU_CLINT].base + i * memmap[NEMU_CLINT].size,
+//            base_hartid, hart_count, false);
+//        riscv_aclint_mtimer_create(memmap[NEMU_CLINT].base +
+//                i * memmap[NEMU_CLINT].size + RISCV_ACLINT_SWI_SIZE,
+//            RISCV_ACLINT_DEFAULT_MTIMER_SIZE, base_hartid, hart_count,
+//            RISCV_ACLINT_DEFAULT_MTIMECMP, RISCV_ACLINT_DEFAULT_MTIME,
+//            RISCV_ACLINT_DEFAULT_TIMEBASE_FREQ, true);
+
+#define NEMU_MTIMER_CMP 0x4000
+#define NEMU_MTIMER 0xBFF8
+
         riscv_aclint_mtimer_create(memmap[NEMU_CLINT].base +
-                i * memmap[NEMU_CLINT].size + RISCV_ACLINT_SWI_SIZE,
+                i * memmap[NEMU_CLINT].size,
             RISCV_ACLINT_DEFAULT_MTIMER_SIZE, base_hartid, hart_count,
-            RISCV_ACLINT_DEFAULT_MTIMECMP, RISCV_ACLINT_DEFAULT_MTIME,
+            NEMU_MTIMER_CMP, NEMU_MTIMER,
             RISCV_ACLINT_DEFAULT_TIMEBASE_FREQ, true);
+
 
         /* Per-socket interrupt controller */
         s->irqchip[i] = nemu_create_plic(memmap, i,
