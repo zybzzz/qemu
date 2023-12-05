@@ -12,12 +12,16 @@ typedef struct NEMUState NEMUState;
 DECLARE_INSTANCE_CHECKER(NEMUState, NEMU_MACHINE,
                          TYPE_NEMU_MACHINE)
 
+typedef struct NEMUConfig{}NEMUConfig;
+
 struct NEMUState{
     /*< private >*/
     MachineState parent;
 
     /*< public >*/
     RISCVHartArrayState soc[NEMU_CPUS_MAX];
+
+    NEMUConfig cfg;
 
     DeviceState *irqchip[NEMU_CPUS_MAX];
 };
