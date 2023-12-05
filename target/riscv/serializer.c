@@ -44,7 +44,7 @@ static void serializeRegs(void){
     // V extertion
     if(cs->env_ptr->vill){
         for(int i = 0; i < 32 * RV_VLEN_MAX / 64; i++){
-            cpu_physical_memory_write(VECTOR_REGS_CPT_ADDR + i*8, &cs->env_ptr->vreg[i], 8);
+            cpu_physical_memory_write(VECTOR_REG_CPT_ADDR + i*8, &cs->env_ptr->vreg[i], 8);
         }
         info_report("Writting vector registers to checkpoint memory");
     }
@@ -54,22 +54,23 @@ static void serializeRegs(void){
         if(csr_ops[i].read != NULL){
             target_ulong val;
             csr_ops[i].read(cs->env_ptr, i, &val);
-            cpu_physical_memory_write(CSR_CPT_ADDR + i * 8, &val, 8);
+            cpu_physical_memory_write(CSR_REG_CPT_ADDR + i * 8, &val, 8);
         }
     }
 
     uint64_t val;
     val = CPT_MAGIC_BUMBER;
-    cpu_physical_memory_write(BOOT_FLAGS, &val, 8);
+    cpu_physical_memory_write(BOOT_FLAG_ADDR, &val, 8);
 
     uint64_t mstatus=cs->env_ptr->mstatus;
-    set_field(mstatus, MSTATUS_MPIE,get_field(mstatus, MSTATUS_MIE));
-    set_field(mstatus, MSTATUS_MIE,0);
-    set_field(mstatus, MSTATUS_MPP,cs->env_ptr->priv);
-    cpu_physical_memory_write(CSR_CPT_ADDR + 0x300 * 8, &val, 8);
+    uint64_t mstatus_mie=get_field(mstatus, MSTATUS_MIE);
+    mstatus=set_field(mstatus, MSTATUS_MPIE,mstatus_mie);
+    mstatus=set_field(mstatus, MSTATUS_MIE,0);
+    mstatus=set_field(mstatus, MSTATUS_MPP,cs->env_ptr->priv);
+    cpu_physical_memory_write(CSR_REG_CPT_ADDR + 0x300 * 8, &mstatus, 8);
 
     uint64_t mepc=cs->env_ptr->mepc;
-    cpu_physical_memory_write(CSR_CPT_ADDR + 0x341 * 8, &val, 8);
+    cpu_physical_memory_write(CSR_REG_CPT_ADDR + 0x341 * 8, &mepc, 8);
 
 
     uint32_t mtime_cmp;
@@ -77,7 +78,7 @@ static void serializeRegs(void){
     cpu_physical_memory_read(CLINT_MMIO+CLINT_MTIMECMP, &mtime_cmp, 4);
     mtime_cmp_64=(uint64_t)mtime_cmp;
 //    uint64_t mtimecmp = riscv_aclint_mtimer_read(my_riscv_mtimer, my_riscv_mtimer->timecmp_base, 8);
-    cpu_physical_memory_write(MTIME_CPT_ADDR, ()&mtime_cmp_64, 8);
+    cpu_physical_memory_write(MTIME_CPT_ADDR, &mtime_cmp_64, 8);
 
     uint32_t mtime;
     uint64_t mtime_64;
@@ -96,21 +97,22 @@ static void serializePMem(uint64_t inst_count)
     uint64_t addr = 0x80000000;
     uint64_t size = info->base_memory;
     gzFile compressed_mem=NULL;
-    char *path=NULL;
 
-    char filepath[200], str_num[100];
+    char filepath[200];
+    //, str_num[100];
     if (checkpoint_state == SimpointCheckpointing) {
-        path=((GString*)(g_list_first(path_manager.checkpoint_path_list)->data))->str;
-        assert(g_mkdir_with_parents(dirname(path),0775)==0);
-        compressed_mem=gzopen(path);
-    } else {
-        strcpy(filepath, pathmanger.output_path);
-        assert(g_mkdir_with_parents(path_manager.output_path,0775)==0);
-        strcat(filepath, "_");
-        strcat(filepath, itoa(inst_count, str_num, 10));
-        strcat(filepath, "_.gz");
-        compressed_mem=gzopen(filepath);
+        strcpy(filepath,((GString*)(g_list_first(path_manager.checkpoint_path_list)->data))->str);
+        g_mkdir_with_parents(g_path_get_dirname(filepath),0775);
+        compressed_mem=gzopen(filepath,"wb");
     }
+   // else {
+   //     strcpy(filepath, path_manager.output_path->str);
+   //     assert(g_mkdir_with_parents(path_manager.output_path,0775)==0);
+   //     strcat(filepath, "_");
+   //     strcat(filepath, itoa(inst_count, str_num, 10));
+   //     strcat(filepath, "_.gz");
+   //     compressed_mem=gzopen(filepath);
+   // }
 
     if (!compressed_mem) {
         error_printf("filename %s can't open", filepath);
@@ -133,13 +135,13 @@ exit:
     gzclose(compressed_mem);
 }
 
-uint64_t get_next_instructions(){
+static uint64_t get_next_instructions(void){
     GList* first_instr=g_list_first(serializer.cpt_instructions);
     uint64_t instrs=0;
     if (first_instr==NULL) {
         return instrs;
     }else{
-        return GPOINTER_TO_GINT(g_list_first(serializer.cpt_instructions)->data);
+        return GPOINTER_TO_UINT(g_list_first(serializer.cpt_instructions)->data);
     }
     return instrs*serializer.cpt_interval;
 }
@@ -155,7 +157,7 @@ static bool instrsCouldTakeCpt(uint64_t num_insts) {
             if (num_insts >= limit_instructions) {
                 info_report("Should take cpt now: %lu", num_insts);
                 return true;
-            } else if (num_insts % serializer.intervalSize == 0) {
+            } else if (num_insts % serializer.cpt_interval == 0) {
                 info_report("First cpt @ %lu, now: %lu",
                 limit_instructions, num_insts);
                 break;
