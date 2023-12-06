@@ -38,6 +38,7 @@
 
 /* global register indices */
 static TCGv cpu_gpr[32], cpu_gprh[32], cpu_pc, cpu_vl, cpu_vstart;
+static TCGv cpu_exec_count;
 static TCGv_i64 cpu_fpr[32]; /* assume F and D extensions */
 static TCGv load_res;
 static TCGv load_val;
@@ -1311,6 +1312,7 @@ static const TranslatorOps riscv_tr_ops = {
     .insn_start         = riscv_tr_insn_start,
     .translate_insn     = riscv_tr_translate_insn,
     .tb_stop            = riscv_tr_tb_stop,
+    .cpu_exec_count     = &cpu_exec_count,
 };
 
 void gen_intermediate_code(CPUState *cs, TranslationBlock *tb, int *max_insns,
@@ -1345,6 +1347,7 @@ void riscv_translate_init(void)
             offsetof(CPURISCVState, fpr[i]), riscv_fpr_regnames[i]);
     }
 
+    cpu_exec_count = tcg_global_mem_new(tcg_env, offsetof(CPURISCVState,profiling_insns), "profiling_insns");
     cpu_pc = tcg_global_mem_new(tcg_env, offsetof(CPURISCVState, pc), "pc");
     cpu_vl = tcg_global_mem_new(tcg_env, offsetof(CPURISCVState, vl), "vl");
     cpu_vstart = tcg_global_mem_new(tcg_env, offsetof(CPURISCVState, vstart),

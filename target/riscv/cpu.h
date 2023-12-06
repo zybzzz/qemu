@@ -464,6 +464,8 @@ struct CPUArchState {
     hwaddr kernel_addr;
     hwaddr fdt_addr;
 
+    uint64_t profiling_insns;
+
 #ifdef CONFIG_KVM
     /* kvm timer */
     bool kvm_timer_dirty;
