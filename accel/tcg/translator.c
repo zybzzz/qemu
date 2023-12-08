@@ -202,6 +202,8 @@ void translator_loop(CPUState *cpu, TranslationBlock *tb, int *max_insns,
         }
     }
 
+//    printf("exec cpu insns update %s %lx num_insns %d\n",((TCGTemp*)tcgv_i64_arg(*cpu_exec_count))->name,((TCGTemp*)tcgv_i64_arg(*cpu_exec_count))->val,db->num_insns);
+
     /* Emit code to exit the TB, as indicated by db->is_jmp.  */
     ops->tb_stop(db, cpu);
     gen_tb_end(tb, cflags, icount_start_insn, db->num_insns);

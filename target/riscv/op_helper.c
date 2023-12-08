@@ -25,12 +25,17 @@
 #include "exec/cpu_ldst.h"
 #include "exec/helper-proto.h"
 #include "sysemu/runstate.h"
+#include "checkpoint/checkpoint.h"
 
 
 void helper_nemu_trap(CPURISCVState *env,target_ulong a0){
+    printf("nemu_trap get insns %ld\n",env->profiling_insns);
+    fflush(stdout);
     if (a0==0x100) {
         env->mie=(env->mie&(~(1<<7)));
         env->mie=(env->mie&(~(1<<5)));
+        checkpoint.workload_loaded=true;
+        env->profiling_insns=0;
     }else if (a0==0x101) {
     }else if (a0==0x102) {
     }else {

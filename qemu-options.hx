@@ -172,7 +172,7 @@ ERST
 
 
 
-DEF("cpt-interval", HAS_ARG, QEMU_OPTION_interval,
+DEF("cpt-interval", HAS_ARG, QEMU_OPTION_cpt_interval,
     "cpt interval: the profiling period for simpoint; the checkpoint interval for uniform cpt\n",
     QEMU_ARCH_ALL)
 
@@ -181,25 +181,35 @@ SRST
     Define an SGX EPC section.
 ERST
 
-DEF("simpoint_path", HAS_ARG, QEMU_OPTION_simpoint_path,
+DEF("simpoint-path", HAS_ARG, QEMU_OPTION_simpoint_path,
     "simpoints path\n",
     QEMU_ARCH_ALL)
 
 SRST
-``cpt interval: the profiling period for simpoint; the checkpoint interval for uniform cpt\n``
+``simpoint-path: simpoint result\n``
     Define an SGX EPC section.
 ERST
 
-DEF("workload_name", HAS_ARG, QEMU_OPTION_workload_name,
+DEF("checkpoint-mode", HAS_ARG, QEMU_OPTION_checkpoint_mode,
+    "set will take checkpoint\n",
+    QEMU_ARCH_ALL)
+
+SRST
+``checkpoint-mode: set will take checkpoint\n``
+    Define an SGX EPC section.
+ERST
+
+
+DEF("workload", HAS_ARG, QEMU_OPTION_workload_name,
     "workload_name\n",
     QEMU_ARCH_ALL)
 
 SRST
-``workload_name\n``
+``workload\n``
     Define an SGX EPC section.
 ERST
 
-DEF("output_base_dir", HAS_ARG, QEMU_OPTION_output_base_dir,
+DEF("output-base-dir", HAS_ARG, QEMU_OPTION_output_base_dir,
     "store simpoint bbv, cpts, and stats in STAT_DIR\n",
     QEMU_ARCH_ALL)
 

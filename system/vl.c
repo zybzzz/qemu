@@ -202,14 +202,10 @@ const char * simpoints_path = NULL;
 const char * output_base_dir = NULL;
 const char * config_name = NULL;
 const char * workload_name = NULL;
-bool checkpoint_taking = false;
-bool xpoint_profiling_started = false;
-int profiling_state = NoCheckpoint;
-int checkpoint_state = NoCheckpoint;
-uint64_t checkpoint_interval = 0;
 
-Serializer serializer;
+SimpointInfo simpoint_info;
 PathManager path_manager;
+Checkpoint checkpoint;
 /* ------------------------------------------------------ end --------------------------------------------*/
 
 static const struct {
@@ -2769,11 +2765,10 @@ static void init_serializer(void){
     FILE * simpoints_file = NULL;
     FILE * weights_file = NULL;
 
-    if  (checkpoint_state == SimpointCheckpointing) {
-        assert(checkpoint_interval);
-        serializer.cpt_interval = checkpoint_interval;
+    if  (checkpoint.checkpoint_mode == SimpointCheckpointing) {
+        assert(checkpoint.cpt_interval);
         info_report("Taking simpoint checkpionts with profiling interval %lu",
-            checkpoint_interval);
+            checkpoint.cpt_interval);
 
 
         GString *simpoints_path=g_string_new(NULL);
@@ -2797,8 +2792,8 @@ static void init_serializer(void){
             assert(weight_id == simpoint_id);
             GString *weight_str=g_string_new(weight);
 
-            serializer.cpt_instructions=g_list_append(serializer.cpt_instructions,GINT_TO_POINTER (simpoint_location));
-            serializer.weights=g_list_append(serializer.weights,weight_str);
+            simpoint_info.cpt_instructions=g_list_append(simpoint_info.cpt_instructions,GINT_TO_POINTER (simpoint_location));
+            simpoint_info.weights=g_list_append(simpoint_info.weights,weight_str);
 
             info_report("Simpoint %lu: @ %lu, weight: %s", simpoint_id, simpoint_location, weight);
         }
@@ -2807,11 +2802,9 @@ static void init_serializer(void){
         fclose(weights_file);
 
 
-    } else if (checkpoint_state==UniformCheckpointing) {
-        assert(checkpoint_interval);
-        serializer.cpt_interval = checkpoint_interval;
-        info_report("Taking uniform checkpionts with interval %lu", checkpoint_interval);
-        serializer.nextUniformPoint = serializer.cpt_interval;
+    } else if (checkpoint.checkpoint_mode==UniformCheckpointing) {
+        info_report("Taking uniform checkpionts with interval %lu", checkpoint.cpt_interval);
+        checkpoint.next_uniform_point = checkpoint.cpt_interval;
     }
 }
 
@@ -2857,8 +2850,8 @@ static void replace_space(gpointer data, gpointer user_data){
 
 static void prepare_output_path(gpointer data, gpointer user_data){
     GString* checkpoint_path=g_string_new(NULL);
-    gint data_position=g_list_index(serializer.cpt_instructions,data);
-    g_string_printf(checkpoint_path, "%s/%d/_ %d _%s.gz",(char*)user_data,GPOINTER_TO_INT(data),GPOINTER_TO_INT(data),((GString*)(g_list_nth(serializer.weights,data_position)->data))->str);
+    gint data_position=g_list_index(simpoint_info.cpt_instructions,data);
+    g_string_printf(checkpoint_path, "%s/%d/_ %d _%s.gz",(char*)user_data,GPOINTER_TO_INT(data),GPOINTER_TO_INT(data),((GString*)(g_list_nth(simpoint_info.weights,data_position)->data))->str);
     path_manager.checkpoint_path_list=g_list_append(path_manager.checkpoint_path_list,checkpoint_path);
 }
 
@@ -2873,8 +2866,10 @@ static void init_path_manager(void){
     path_manager.config_name=g_string_new(config_name);
     sprintf(base_output_path,"%s/%s/%s",output_base_dir,config_name,workload_name);
 
+    info_report("base output path %s",base_output_path);
+
     //prepare simpoint path for init serializer
-    if (checkpoint_state == SimpointCheckpointing) {
+    if (checkpoint.checkpoint_mode == SimpointCheckpointing) {
         assert(simpoints_path);
         path_manager.simpoint_path=g_string_new(simpoints_path);
         g_string_printf(path_manager.simpoint_path, "%s/%s",simpoints_path,path_manager.workload_name->str);
@@ -2882,36 +2877,17 @@ static void init_path_manager(void){
 
     init_serializer();
 
-    if (checkpoint_state == SimpointCheckpointing) {
-        g_list_foreach(serializer.cpt_instructions, prepare_output_path,base_output_path);
+    if (checkpoint.checkpoint_mode == SimpointCheckpointing) {
+        g_list_foreach(simpoint_info.cpt_instructions, prepare_output_path,base_output_path);
 
         path_manager.checkpoint_path_list=g_list_sort(path_manager.checkpoint_path_list,g_compare_path);
-        serializer.cpt_instructions=g_list_sort(serializer.cpt_instructions,g_compare_instrs);
+        simpoint_info.cpt_instructions=g_list_sort(simpoint_info.cpt_instructions,g_compare_instrs);
 
         g_list_foreach(path_manager.checkpoint_path_list,replace_space,NULL);
 
         g_list_foreach(path_manager.checkpoint_path_list,check_path,NULL);
-        g_list_foreach(serializer.cpt_instructions,check_instrs,NULL);
+        g_list_foreach(simpoint_info.cpt_instructions,check_instrs,NULL);
     }
-    //free weights
-
-//
-//
-//    path_manager.output_path=g_string_new(output_checkpoint_path);
-
-//    path_manager.cptID = -1;
-//
-//    if (checkpoint_state == SimpointCheckpointing) {
-//        path_manager.cptID = 0;
-//    }
-//    info_report("Cpt id: %i", path_manager.cptID);
-
-//    struct  stat st;
-//    if(stat(path_manager.output_path->str, &st) != 0){
-//        if(mkdir(path_manager.output_path->str, 0777) == 0){
-//            info_report("Created %s\n", path_manager.output_path->str);
-//        }
-//    }
 }
 
 void qemu_init(int argc, char **argv)
@@ -3807,21 +3783,32 @@ void qemu_init(int argc, char **argv)
             }
 #endif /* CONFIG_POSIX */
 
+            case QEMU_OPTION_checkpoint_mode:
+                {
+                    if (strcmp(optarg,"NoCheckpoint")==0) {
+                        checkpoint.checkpoint_mode=NoCheckpoint;
+                    }else if(strcmp(optarg,"SimpointCheckpoint")==0){
+                        checkpoint.checkpoint_mode=SimpointCheckpointing;
+                    }else if(strcmp(optarg,"UniformCheckpoint")==0){
+                        checkpoint.checkpoint_mode=UniformCheckpointing;
+                    }else{
+                        checkpoint.checkpoint_mode=NoCheckpoint;
+                    }
+                    break;
+                }
             case QEMU_OPTION_simpoint_path:
                 {
                     simpoints_path = optarg;
-                    checkpoint_state = SimpointCheckpointing;
                     break;
                 }
             case QEMU_OPTION_workload_name:
                 {
                     workload_name = optarg;
-                    checkpoint_state = SimpointCheckpointing;
                     break;
                 }
-            case QEMU_OPTION_interval:
+            case QEMU_OPTION_cpt_interval:
                 {
-                    checkpoint_interval = atoi(optarg);
+                    checkpoint.cpt_interval = atoi(optarg);
                     break;
                 }
             case QEMU_OPTION_output_base_dir:
@@ -3844,15 +3831,11 @@ void qemu_init(int argc, char **argv)
 
 
     /*
-     *
      * simpoint file init
      */
-    bool output_features_enabled = checkpoint_state!=NoCheckpoint || profiling_state == SimpointProfiling;
-    if (output_features_enabled) {
+    if (checkpoint.checkpoint_mode!=NoCheckpoint) {
         init_path_manager();
-//        init_serializer();
     }
-
 
     /*
      * Clear error location left behind by the loop.

@@ -42,35 +42,34 @@ enum CheckpointState{
     NoCheckpoint=0,
     SimpointCheckpointing,
     UniformCheckpointing,
-    ManualOneShotCheckpointing,
-    ManualUniformCheckpointing,
-};
-enum ProfilingState{
-    NoProfiling =0,
-    SimpointProfiling,
 };
 
 typedef struct PathManager{
     GString *base_dir;
+
     GString *workload_name;
     GString *config_name;
     GString *output_path;
 
     GString *simpoint_path;
-
     GList *checkpoint_path_list;
 }PathManager;
 
-typedef struct Serializer{
-    uint64_t cpt_interval;
-    uint64_t nextUniformPoint;
+typedef struct SimpointInfo{
     GList *cpt_instructions;
     GList *weights;
-}Serializer;
+}SimpointInfo;
 
-extern int checkpoint_state;
-extern Serializer serializer;
+typedef struct Checkpoint{
+    uint64_t cpt_interval;
+    uint64_t next_uniform_point;
+    uint64_t checkpoint_mode;
+    bool workload_loaded;
+}Checkpoint;
+
+extern SimpointInfo simpoint_info;
 extern PathManager path_manager;
+extern Checkpoint checkpoint;
 
 bool try_take_cpt(uint64_t icount);
 #endif
