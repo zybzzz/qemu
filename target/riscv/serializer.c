@@ -34,7 +34,6 @@ static void serializeRegs(void) {
     }
     info_report("Writting float registers to checkpoint memory");
 
-    cpu_physical_memory_write(PC_CPT_ADDR, &cs->env_ptr->pc, 8);
 
     // V extertion
     if(cs->env_ptr->vill) {
@@ -53,39 +52,49 @@ static void serializeRegs(void) {
         }
     }
     info_report("Writting csr registers to checkpoint memory");
+    uint64_t tmp_satp=0;
+    cpu_physical_memory_read(CSR_REG_CPT_ADDR + 0x180 * 8, &tmp_satp, 8);
+    info_report("Satp from env %lx, Satp from memory %lx",cs->env_ptr->satp, tmp_satp);
 
-    uint64_t val;
-    val = CPT_MAGIC_BUMBER;
-    cpu_physical_memory_write(BOOT_FLAG_ADDR, &val, 8);
+    uint64_t flag_val;
+    flag_val = CPT_MAGIC_BUMBER;
+    cpu_physical_memory_write(BOOT_FLAG_ADDR, &flag_val, 8);
 
-    uint64_t mstatus=cs->env_ptr->mstatus;
-    uint64_t mstatus_mie=get_field(mstatus, MSTATUS_MIE);
-    mstatus=set_field(mstatus, MSTATUS_MPIE,mstatus_mie);
-    mstatus=set_field(mstatus, MSTATUS_MIE,0);
-    mstatus=set_field(mstatus, MSTATUS_MPP,cs->env_ptr->priv);
-    cpu_physical_memory_write(CSR_REG_CPT_ADDR + 0x300 * 8, &mstatus, 8);
-    info_report("Writting mstatus registers to checkpoint memory: %lx",mstatus);
+    uint64_t tmp_mip=cs->env_ptr->mip;
+    tmp_mip=set_field(tmp_mip, MIP_MTIP, 0);
+    tmp_mip=set_field(tmp_mip, MIP_STIP, 0);
+    cpu_physical_memory_write(CSR_REG_CPT_ADDR + 0x344 * 8, &tmp_mip, 8);
+    info_report("Writting mip registers to checkpoint memory: %lx",tmp_mip);
 
-    uint64_t mepc=cs->env_ptr->mepc;
-    cpu_physical_memory_write(CSR_REG_CPT_ADDR + 0x341 * 8, &mepc, 8);
-    info_report("Writting mepc registers to checkpoint memory: %lx",mepc);
+    uint64_t tmp_mstatus=cs->env_ptr->mstatus;
+    tmp_mstatus=set_field(tmp_mstatus, MSTATUS_MPIE, get_field(tmp_mstatus, MSTATUS_MIE));
+    tmp_mstatus=set_field(tmp_mstatus, MSTATUS_MIE, 0);
+    tmp_mstatus=set_field(tmp_mstatus, MSTATUS_MPP, cs->env_ptr->priv);
+    cpu_physical_memory_write(CSR_REG_CPT_ADDR + 0x300 * 8, &tmp_mstatus, 8);
+    info_report("Writting mstatus registers to checkpoint memory: %lx mpp %lx",tmp_mstatus,cs->env_ptr->priv);
 
+    uint64_t tmp_mepc=cs->env_ptr->pc;
+    cpu_physical_memory_write(CSR_REG_CPT_ADDR + 0x341 * 8, &tmp_mepc, 8);
+    info_report("Writting mepc registers to checkpoint memory: %lx",tmp_mepc);
 
-    uint64_t mtime_cmp;
-    cpu_physical_memory_read(CLINT_MMIO+CLINT_MTIMECMP, &mtime_cmp, 8);
-    cpu_physical_memory_write(MTIME_CPT_ADDR, &mtime_cmp, 8);
-    info_report("Writting mtime_cmp registers to checkpoint memory: %lx %x",mtime_cmp,CLINT_MMIO+CLINT_MTIMECMP);
+    cpu_physical_memory_write(PC_CPT_ADDR, &cs->env_ptr->pc, 8);
+    cpu_physical_memory_write(MODE_CPT_ADDR, &cs->env_ptr->priv, 8);
 
-    uint64_t mtime;
-    cpu_physical_memory_read(CLINT_MMIO+CLINT_MTIME, &mtime, 8);
-    cpu_physical_memory_write(MTIME_CMP_CPT_ADDR, &mtime, 8);
-    info_report("Writting mtime registers to checkpoint memory: %lx %x",mtime,CLINT_MMIO+CLINT_MTIME);
+    uint64_t tmp_mtime_cmp;
+    cpu_physical_memory_read(CLINT_MMIO+CLINT_MTIMECMP, &tmp_mtime_cmp, 8);
+    cpu_physical_memory_write(MTIME_CPT_ADDR, &tmp_mtime_cmp, 8);
+    info_report("Writting mtime_cmp registers to checkpoint memory: %lx %x",tmp_mtime_cmp,CLINT_MMIO+CLINT_MTIMECMP);
+
+    uint64_t tmp_mtime;
+    cpu_physical_memory_read(CLINT_MMIO+CLINT_MTIME, &tmp_mtime, 8);
+    cpu_physical_memory_write(MTIME_CMP_CPT_ADDR, &tmp_mtime, 8);
+    info_report("Writting mtime registers to checkpoint memory: %lx %x",tmp_mtime,CLINT_MMIO+CLINT_MTIME);
 }
 
 
 static void serialize_pmem(uint64_t inst_count)
 {
-#define MEM_READ_BUF_SIZE 40960
+#define MEM_READ_BUF_SIZE 409600
 #define FILEPATH_BUF_SIZE 256
     MemoryInfo * guest_pmem_info = qmp_query_memory_size_summary(NULL);
     uint64_t guest_pmem_size = guest_pmem_info->base_memory;
@@ -129,6 +138,9 @@ static void serialize_pmem(uint64_t inst_count)
 exit:
     gzclose(compressed_mem);
     info_report("success write into checkpoint file: %s",filepath);
+    uint64_t mtime;
+    cpu_physical_memory_read(MTIME_CMP_CPT_ADDR, &mtime, 8);
+    cpu_physical_memory_write(CLINT_MMIO+CLINT_MTIME, &mtime, 8);
 }
 
 static uint64_t get_next_instructions(void) {
@@ -141,11 +153,16 @@ static uint64_t get_next_instructions(void) {
     }
 }
 
+static int get_env_cpu_mode(void){
+    CPUState *cs = qemu_get_cpu(0);
+    return cs->env_ptr->priv;
+}
+
 static bool instrsCouldTakeCpt(uint64_t icount) {
     uint64_t limit_instructions = get_next_instructions();
     if (limit_instructions==0) {
-        error_printf("simpoint file or weight file error, get limit_instructions 0\n");
-        //panic
+//        error_printf("simpoint file or weight file error, get limit_instructions 0\n");
+        return false;
     }
     limit_instructions += 100000;
 
@@ -206,7 +223,10 @@ static void serialize(uint64_t icount) {
 }
 
 bool try_take_cpt(uint64_t icount) {
-    if (checkpoint.workload_loaded&&checkpoint.checkpoint_mode!=NoCheckpoint&&instrsCouldTakeCpt(icount)) {
+    if (checkpoint.workload_loaded &&
+        checkpoint.checkpoint_mode!=NoCheckpoint &&
+        get_env_cpu_mode() != PRV_M &&
+        instrsCouldTakeCpt(icount)) {
         serialize(icount);
         notify_taken(icount);
         return true;
