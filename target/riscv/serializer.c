@@ -22,9 +22,15 @@
 
 static void serializeRegs(void) {
     CPUState *cs = qemu_get_cpu(0);
+    RISCVCPU *cpu = RISCV_CPU(&cs->parent_obj);
+
 
     for(int i = 0 ; i < 32; i++) {
         cpu_physical_memory_write(INT_REG_CPT_ADDR + i*8, &cs->env_ptr->gpr[i], 8);
+        printf("gpr %04d value %016lx ",i,cs->env_ptr->gpr[i]);
+        if ((i+1)%4==0) {
+            printf("\n");
+        }
     }
     info_report("Writting int registers to checkpoint memory");
 
@@ -36,12 +42,15 @@ static void serializeRegs(void) {
 
 
     // V extertion
-    if(cs->env_ptr->vill) {
-        for(int i = 0; i < 32 * RV_VLEN_MAX / 64; i++) {
+//    if(cs->env_ptr->virt_enabled) {
+        for(int i = 0; i < 32 * cpu->cfg.vlen / 64; i++) {
             cpu_physical_memory_write(VECTOR_REG_CPT_ADDR + i*8, &cs->env_ptr->vreg[i], 8);
+            if ((i+1)%(2)==0) {
+                info_report("[%lx]: 0x%016lx_%016lx",(uint64_t)VECTOR_REG_CPT_ADDR+(i-1)*8,cs->env_ptr->vreg[i-1],cs->env_ptr->vreg[i]);
+            }
         }
-        info_report("Writting vector registers to checkpoint memory");
-    }
+        info_report("Writting 32 * %d vector registers to checkpoint memory",cpu->cfg.vlen /64);
+//    }
 
     // CSR registers
     for(int i = 0; i < CSR_TABLE_SIZE; i++) {
@@ -92,6 +101,29 @@ static void serializeRegs(void) {
     cpu_physical_memory_read(CLINT_MMIO+CLINT_MTIME, &tmp_mtime, 8);
     cpu_physical_memory_write(MTIME_CMP_CPT_ADDR, &tmp_mtime, 8);
     info_report("Writting mtime registers to checkpoint memory: %lx %x",tmp_mtime,CLINT_MMIO+CLINT_MTIME);
+
+    uint64_t tmp_vstart;
+    csr_ops[0x008].read(cs->env_ptr, 0x008, &tmp_vstart);
+    info_report("vstart registers check: env %lx csr read %lx",cs->env_ptr->vstart,tmp_vstart);
+    uint64_t tmp_vxsat;
+    csr_ops[0x009].read(cs->env_ptr, 0x009, &tmp_vxsat);
+    info_report("vxsat registers check: env %lx csr read %lx",cs->env_ptr->vxsat,tmp_vxsat);
+    uint64_t tmp_vxrm;
+    csr_ops[0x00a].read(cs->env_ptr, 0x00a, &tmp_vxrm);
+    info_report("vxrm registers check: csr read %lx",tmp_vxrm);
+    uint64_t tmp_vcsr;
+    csr_ops[0x00f].read(cs->env_ptr, 0x00f, &tmp_vcsr);
+    info_report("vcsr registers check: csr read %lx",tmp_vcsr);
+    uint64_t tmp_vl;
+    csr_ops[0xc20].read(cs->env_ptr, 0xc20, &tmp_vl);
+    info_report("vl registers check: env %lx csr read %lx",cs->env_ptr->vl,tmp_vl);
+    uint64_t tmp_vtype;
+    csr_ops[0xc21].read(cs->env_ptr, 0xc21, &tmp_vtype);
+    info_report("vtype registers check: env %lx csr read %lx",cs->env_ptr->vtype,tmp_vtype);
+    uint64_t tmp_vlenb;
+    csr_ops[0xc22].read(cs->env_ptr, 0xc22, &tmp_vlenb);
+    info_report("vlenb registers check: csr read %lx",tmp_vlenb);
+
 }
 
 
