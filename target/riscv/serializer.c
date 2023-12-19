@@ -49,6 +49,9 @@ static void serializeRegs(void) {
             target_ulong val;
             csr_ops[i].read(cs->env_ptr, i, &val);
             cpu_physical_memory_write(CSR_REG_CPT_ADDR + i * 8, &val, 8);
+            if (val!=0) {
+                info_report("csr id %x name %s value %lx",i,csr_ops[i].name,val);
+            }
         }
     }
     info_report("Writting csr registers to checkpoint memory");
@@ -158,6 +161,11 @@ static int get_env_cpu_mode(void){
     return cs->env_ptr->priv;
 }
 
+static uint64_t get_kernel_insns(void){
+    CPUState *cs = qemu_get_cpu(0);
+    return cs->env_ptr->kernel_insns;
+}
+
 static bool instrsCouldTakeCpt(uint64_t icount) {
     uint64_t limit_instructions = get_next_instructions();
     if (limit_instructions==0) {
@@ -172,10 +180,10 @@ static bool instrsCouldTakeCpt(uint64_t icount) {
             break;
         } else {
             if (icount >= limit_instructions) {
-                info_report("Should take cpt now: %lu", icount);
+                info_report("Should take cpt now: %lu limit_instructions: %lu", icount,limit_instructions);
                 return true;
             } else if (icount % checkpoint.cpt_interval == 0) {
-                info_report("First cpt @ %lu, now: %lu",
+                info_report("Next cpt @ %lu, now: %lu",
                             limit_instructions, icount);
                 break;
             } else {
@@ -222,13 +230,27 @@ static void serialize(uint64_t icount) {
     serialize_pmem(icount);
 }
 
+static bool could_take_checkpoint(uint64_t icount){
+    if (checkpoint.checkpoint_mode==NoCheckpoint) {
+        return false;
+    }
+    if (!checkpoint.workload_loaded) {
+        return false;
+    }
+    if (get_env_cpu_mode()==PRV_M) {
+        return false;
+    }
+    if (!instrsCouldTakeCpt(icount)) {
+        return false;
+    }
+    return true;
+}
+
 bool try_take_cpt(uint64_t icount) {
-    if (checkpoint.workload_loaded &&
-        checkpoint.checkpoint_mode!=NoCheckpoint &&
-        get_env_cpu_mode() != PRV_M &&
-        instrsCouldTakeCpt(icount)) {
-        serialize(icount);
-        notify_taken(icount);
+    uint64_t workload_exec_insns=icount-get_kernel_insns();
+    if (could_take_checkpoint(workload_exec_insns)) {
+        serialize(workload_exec_insns);
+        notify_taken(workload_exec_insns);
         return true;
     }
     return false;
