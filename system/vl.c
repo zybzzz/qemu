@@ -2806,6 +2806,7 @@ static void init_serializer(void){
         info_report("Taking uniform checkpionts with interval %lu", checkpoint.cpt_interval);
         checkpoint.next_uniform_point = checkpoint.cpt_interval;
     }
+    checkpoint.workload_loaded=false;
 }
 
 static gint g_compare_path(gconstpointer a,gconstpointer b){
