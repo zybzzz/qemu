@@ -184,6 +184,11 @@ static uint64_t get_next_instructions(void) {
     if (first_insns_item==NULL) {
         return insns;
     } else {
+        if (first_insns_item->data==0) {
+            simpoint_info.cpt_instructions=g_list_remove(simpoint_info.cpt_instructions,g_list_first(simpoint_info.cpt_instructions)->data);
+            path_manager.checkpoint_path_list=g_list_remove(path_manager.checkpoint_path_list,g_list_first(path_manager.checkpoint_path_list)->data);
+            return 0;
+        }
         return GPOINTER_TO_UINT(first_insns_item->data) * checkpoint.cpt_interval;
     }
 }
