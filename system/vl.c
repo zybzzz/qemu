@@ -198,10 +198,10 @@ static int default_net = 1;
 
 
 /* -------------------------------------------------- arg for checkpoint -----------------------------------*/
-const char * simpoints_path = NULL;
-const char * output_base_dir = NULL;
-const char * config_name = NULL;
-const char * workload_name = NULL;
+static const char * simpoints_path = NULL;
+static const char * output_base_dir = NULL;
+static const char * config_name = NULL;
+static const char * workload_name = NULL;
 
 SimpointInfo simpoint_info;
 PathManager path_manager;
@@ -2785,10 +2785,10 @@ static void init_serializer(void){
         uint64_t simpoint_location, simpoint_id, weight_id;
         char weight[128];
 
-        while (fscanf(simpoints_file, "%lu %lu\n", &simpoint_location, &simpoint_id) != EOF)
+        while (fscanf(simpoints_file, "%lu %lu\n", &simpoint_location, &simpoint_id) != EOF && fscanf(weights_file, "%s %lu\n", weight, &weight_id)!=EOF)
         {
 
-            assert(fscanf(weights_file, "%s %lu\n", weight, &weight_id));
+//            assert();
             assert(weight_id == simpoint_id);
             GString *weight_str=g_string_new(weight);
 
@@ -2805,7 +2805,11 @@ static void init_serializer(void){
     } else if (checkpoint.checkpoint_mode==UniformCheckpointing) {
         info_report("Taking uniform checkpionts with interval %lu", checkpoint.cpt_interval);
         checkpoint.next_uniform_point = checkpoint.cpt_interval;
+    } else{
+        error_report("Checkpoint mode just support SimpointCheckpoint and UniformCheckpoint");
+        exit(1);
     }
+
     checkpoint.workload_loaded=false;
 }
 
@@ -2849,10 +2853,12 @@ static void replace_space(gpointer data, gpointer user_data){
     g_string_printf(data,"%s%d%s",str_before,instrs,str_after);
 }
 
-static void prepare_output_path(gpointer data, gpointer user_data){
+static void prepare_output_path(gpointer cpt_instructions_item, gpointer base_output_path){
     GString* checkpoint_path=g_string_new(NULL);
-    gint data_position=g_list_index(simpoint_info.cpt_instructions,data);
-    g_string_printf(checkpoint_path, "%s/%d/_ %d _%s.gz",(char*)user_data,GPOINTER_TO_INT(data),GPOINTER_TO_INT(data),((GString*)(g_list_nth(simpoint_info.weights,data_position)->data))->str);
+    gint data_position=g_list_index(simpoint_info.cpt_instructions,cpt_instructions_item);
+    // base_path/cpt_instruction_limit/_CptInstructionLimit_weights.gz
+    g_string_printf(checkpoint_path, "%s/%d/_ %d _%s.gz",(char*)base_output_path,GPOINTER_TO_INT(cpt_instructions_item),GPOINTER_TO_INT(cpt_instructions_item),((GString*)(g_list_nth(simpoint_info.weights,data_position)->data))->str);
+
     path_manager.checkpoint_path_list=g_list_append(path_manager.checkpoint_path_list,checkpoint_path);
 }
 
@@ -2876,10 +2882,11 @@ static void init_path_manager(void){
         g_string_printf(path_manager.simpoint_path, "%s/%s",simpoints_path,path_manager.workload_name->str);
     }
 
+    //need prepare_simpoint_path
     init_serializer();
 
     if (checkpoint.checkpoint_mode == SimpointCheckpointing) {
-        g_list_foreach(simpoint_info.cpt_instructions, prepare_output_path,base_output_path);
+        g_list_foreach(simpoint_info.cpt_instructions, prepare_output_path, base_output_path);
 
         path_manager.checkpoint_path_list=g_list_sort(path_manager.checkpoint_path_list,g_compare_path);
         simpoint_info.cpt_instructions=g_list_sort(simpoint_info.cpt_instructions,g_compare_instrs);
