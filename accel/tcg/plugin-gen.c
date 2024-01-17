@@ -278,9 +278,13 @@ static void plugin_gen_inject(struct qemu_plugin_tb *plugin_tb)
      */
     memset(tcg_ctx->free_temps, 0, sizeof(tcg_ctx->free_temps));
 
+    // for (op = &tcg_ctx->ops->tqh_first;op;op=op->field.tqe_next)
     QTAILQ_FOREACH_SAFE(op, &tcg_ctx->ops, link, next) {
         switch (op->opc) {
         case INDEX_op_insn_start:
+            // start
+            // func
+            // end
             insn_idx++;
             break;
 
