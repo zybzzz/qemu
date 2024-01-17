@@ -88,23 +88,32 @@ static const MemMapEntry nemu_memmap[] = {
 
 static void nemu_load_firmware(MachineState *machine){
     const MemMapEntry *memmap = nemu_memmap;
-    char *firmware_name;
+//    char *firmware_name;
     NEMUState *s = NEMU_MACHINE(machine);
-    uint64_t firmware_end_addr;
+    uint64_t firmware_end_addr=0;
+    uint64_t kernel_entry=0;
+    uint64_t kernel_start_addr=0;
 
     /* Find firmware */
-    firmware_name = riscv_find_firmware(machine->firmware,
-                        riscv_default_firmware_name(&s->soc[0]));
+//    firmware_name = riscv_find_firmware(machine->firmware,
+//                        riscv_default_firmware_name(&s->soc[0]));
 
-    if (firmware_name) {
-       firmware_end_addr = riscv_find_and_load_firmware(machine, firmware_name,
-                                                         memmap[NEMU_DRAM].base, NULL);
-       printf("%s %lx\n",firmware_name,firmware_end_addr);
-       g_free(firmware_name);
-    }
+//    if (firmware_name) {
+   firmware_end_addr = riscv_find_and_load_firmware(machine,riscv_default_firmware_name(&s->soc[0]),
+                                                     memmap[NEMU_DRAM].base, NULL);
+   printf("%s %lx\n",machine->firmware,firmware_end_addr);
+//       g_free(firmware_name);
+//    }
+
+
+   if (machine->kernel_filename&&!kernel_entry) {
+       kernel_start_addr=riscv_calc_kernel_start_addr(&s->soc[0],firmware_end_addr);
+       kernel_entry=riscv_load_kernel(machine,&s->soc[0],kernel_start_addr,true,NULL);
+   }
+   printf("%s %lx\n",machine->kernel_filename,kernel_entry);
 
     /* load the reset vector */
-    riscv_setup_rom_reset_vec(machine, &s->soc[0], memmap[NEMU_DRAM].base,
+   riscv_setup_rom_reset_vec(machine, &s->soc[0], memmap[NEMU_DRAM].base,
                               memmap[NEMU_MROM].base,
                               memmap[NEMU_MROM].size, memmap[NEMU_DRAM].base,
                               memmap[NEMU_DRAM].base);
@@ -232,7 +241,7 @@ static void nemu_machine_class_init(ObjectClass *oc, void *data)
     mc->desc = "RISC-V NEMU board";
     mc->init = nemu_machine_init;
     mc->max_cpus = NEMU_CPUS_MAX;
-    mc->min_cpus = NEMU_CPUS_MAX;
+    mc->min_cpus = NEMU_CPUS_MIN;
     mc->default_cpu_type = TYPE_RISCV_CPU_BASE;
     mc->possible_cpu_arch_ids = riscv_numa_possible_cpu_arch_ids;
     mc->cpu_index_to_instance_props = riscv_numa_cpu_index_to_props;
