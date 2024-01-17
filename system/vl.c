@@ -3968,4 +3968,5 @@ void qemu_init(int argc, char **argv)
     accel_setup_post(current_machine);
     os_setup_post();
     resume_mux_open();
+    multicore_checkpoint_init();
 }

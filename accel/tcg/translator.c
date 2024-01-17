@@ -169,7 +169,6 @@ void translator_loop(CPUState *cpu, TranslationBlock *tb, int *max_insns,
     cpu_exec_count=ops->cpu_exec_count;
     while (true) {
         *max_insns = ++db->num_insns;
-        tcg_gen_addi_i64(*cpu_exec_count,*cpu_exec_count,1);
 
         ops->insn_start(db, cpu);
         db->insn_start = tcg_last_op();
@@ -188,6 +187,7 @@ void translator_loop(CPUState *cpu, TranslationBlock *tb, int *max_insns,
          * done next -- either exiting this loop or locate the start of
          * the next instruction.
          */
+        tcg_gen_addi_i64(*cpu_exec_count,*cpu_exec_count,1);
         ops->translate_insn(db, cpu);
 
         /*

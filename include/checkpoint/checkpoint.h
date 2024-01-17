@@ -72,4 +72,6 @@ extern PathManager path_manager;
 extern Checkpoint checkpoint;
 
 bool try_take_cpt(uint64_t icount);
+bool multi_core_try_take_cpt(uint64_t icount,uint64_t cpu_idx);
+void multicore_checkpoint_init(void);
 #endif
