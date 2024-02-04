@@ -1,12 +1,14 @@
-
 #include "qemu/osdep.h"
 #include "cpu.h"
+#include "target/riscv/cpu.h"
 #include "tcg/tcg.h"
 #include "tcg/tcg-temp-internal.h"
 #include "tcg/tcg-op.h"
 #include "exec/exec-all.h"
 #include "exec/translator.h"
+#include "checkpoint/checkpoint.h"
 #include "exec/helper-proto-common.h"
+#include <stdio.h>
 
 #define HELPER_H "accel/tcg/checkpoint-helper.h"
 #include "exec/helper-info.c.inc"
@@ -27,10 +29,23 @@ static void checkpoint_gen_empty_check_cb(void)
     tcg_temp_free_i32(cpu_index);
 }
 
-static void checkpoint_gen_empty_callback(void){
+void checkpoint_gen_empty_callback(void){
     checkpoint_gen_empty_check_cb();
 }
 
 
+//static int temp_index=0;
+void helper_checkpoint_sync_check(uint32_t cpu_index, void *udata){
+    CPUState *cs=qemu_get_cpu(cpu_index);
+    CPURISCVState *env = cpu_env(cs);
+//    try_take_cpt(env->profiling_insns);
+    multi_core_try_take_cpt(env->profiling_insns,cpu_index);
+
+
+//    if (cpu_index!=temp_index) {
+//        printf("from my helper cpuindex %d, udata %p\n",cpu_index,udata);
+//        temp_index=cpu_index;
+//    }
+}
 
 

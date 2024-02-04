@@ -16,6 +16,9 @@
 #include "semihosting/semihost.h"
 #include "instmap.h"
 #include <zlib.h>
+
+#include <zstd.h>
+
 #include "internals.h"
 #include "hw/intc/riscv_aclint.h"
 #include "qapi/qapi-commands-machine.h"
@@ -128,6 +131,7 @@ static void serializeRegs(void) {
 }
 
 
+
 static void serialize_pmem(uint64_t inst_count)
 {
 #define MEM_READ_BUF_SIZE 409600
@@ -141,7 +145,25 @@ static void serialize_pmem(uint64_t inst_count)
     uint64_t guest_pmem_start_addr = 0x80000000;
     gzFile compressed_mem=NULL;
 
-
+//    size_t const compress_buffer_size = ZSTD_compressBound(guest_pmem_size);
+//    void* const compress_buffer = malloc(compress_buffer_size);
+//    assert(compress_buffer);
+//
+//    size_t const compress_size = ZSTD_compress(compress_buffer, compress_buffer_size, serialize_mem_buf, guest_pmem_size, 1);
+//    assert(compress_size<=compress_buffer_size&&compress_size!=0);
+//
+//    FILE *compress_file=fopen(filepath,"wb");
+//    size_t fw_size = fwrite(compress_buffer,1,compress_size,compress_file);
+//
+//    if (fw_size != (size_t)compress_size) {
+//        fprintf(stderr, "fwrite: %s : %s \n", filepath, strerror(errno));
+//    }
+//    if (fclose(compress_file)) {
+//        fprintf(stderr, "fclose: %s : %s \n", filepath, strerror(errno));
+//    }
+//
+//    free(compress_buffer);
+//
     //prepare path
     if (checkpoint.checkpoint_mode == SimpointCheckpointing) {
         strcpy(filepath,((GString*)(g_list_first(path_manager.checkpoint_path_list)->data))->str);

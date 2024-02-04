@@ -3829,6 +3829,11 @@ void qemu_init(int argc, char **argv)
                     config_name = optarg;
                     break;
                 }
+            case QEMU_OPTION_boot_checkpoint:
+                {
+                    qdict_put_str(machine_opts_dict, "checkpoint", optarg);
+                    break;
+                }
 
             default:
                 error_report("Option not supported in this build");

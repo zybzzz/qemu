@@ -67,6 +67,14 @@ typedef struct Checkpoint{
     bool workload_loaded;
 }Checkpoint;
 
+typedef struct sync_info{
+    uint8_t *workload_loaded_percpu;
+    uint64_t *workload_insns;
+    uint64_t cpus;
+    bool *checkpoint_end;
+}sync_info_t;
+
+
 extern SimpointInfo simpoint_info;
 extern PathManager path_manager;
 extern Checkpoint checkpoint;
@@ -74,4 +82,5 @@ extern Checkpoint checkpoint;
 bool try_take_cpt(uint64_t icount);
 bool multi_core_try_take_cpt(uint64_t icount,uint64_t cpu_idx);
 void multicore_checkpoint_init(void);
+void checkpoint_gen_empty_callback(void);
 #endif

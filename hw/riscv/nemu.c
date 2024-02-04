@@ -30,6 +30,7 @@
 #include "hw/sysbus.h"
 #include "qemu/typedefs.h"
 #include "qemu/units.h"
+#include "qom/object.h"
 #include "target/riscv/cpu.h"
 #include "hw/riscv/riscv_hart.h"
 #include "hw/riscv/nemu.h"
@@ -45,6 +46,7 @@
 #include "hw/intc/riscv_aclint.h"
 #include "hw/intc/sifive_plic.h"
 #include <libfdt.h>
+#include <zstd.h>
 
 enum {
     UART0_IRQ = 10,
@@ -82,9 +84,59 @@ static const MemMapEntry nemu_memmap[] = {
     [NEMU_PLIC]     =      {     0x3c000000,   0x4000000 },
     [NEMU_CLINT]    =      {     0x38000000,     0x10000 },
     [NEMU_UARTLITE] =      {     0x40600000,      0x1000 },
-    [NEMU_DRAM]     =      {     0x80000000,        0x00 },
+    [NEMU_DRAM]     =      {     0x80000000,  0x80000000 },
 
 };
+
+static int load_checkpoint(MachineState *machine,const char* checkpoint_path){
+    NEMUState *s = NEMU_MACHINE(machine);
+    int fd=-1;
+    int compressed_size;
+    int decompressed_size;
+    char *compress_file_buf=NULL;
+    int load_compressed_size;
+
+    uint64_t frame_content_size;
+
+    if (checkpoint_path) {
+        fd=open(checkpoint_path, O_RDONLY|O_BINARY);
+        if (fd<0) {
+            return -1;
+        }
+
+        compressed_size=lseek(fd, 0, SEEK_END);
+        if (compressed_size == 0) {
+            return -2;
+        }
+        lseek(fd, 0, SEEK_SET);
+
+        compress_file_buf=g_malloc(compressed_size);
+        load_compressed_size=read(fd, compress_file_buf, compressed_size);
+
+        if (load_compressed_size!=compressed_size) {
+            close(fd);
+            g_free(compress_file_buf);
+            return -3;
+        }
+
+        close(fd);
+
+        frame_content_size=ZSTD_getFrameContentSize(compress_file_buf, compressed_size);
+
+        decompressed_size=ZSTD_decompress(s->memory, frame_content_size, compress_file_buf, compressed_size);
+
+        g_free(compress_file_buf);
+//        if (decompressed_size!=frame_content_size) {
+//            return -4;
+//        }
+
+        printf("load checkpoint %s success, decompress size %d frame_content_size %ld\n",checkpoint_path,decompressed_size,frame_content_size);
+    }else{
+        return -5;
+    }
+
+    return 1;
+}
 
 static void nemu_load_firmware(MachineState *machine){
     const MemMapEntry *memmap = nemu_memmap;
@@ -101,16 +153,21 @@ static void nemu_load_firmware(MachineState *machine){
 //    if (firmware_name) {
    firmware_end_addr = riscv_find_and_load_firmware(machine,riscv_default_firmware_name(&s->soc[0]),
                                                      memmap[NEMU_DRAM].base, NULL);
-   printf("%s %lx\n",machine->firmware,firmware_end_addr);
-//       g_free(firmware_name);
-//    }
 
+   if (machine->firmware&&firmware_end_addr) {
+       printf("%s %lx\n",machine->firmware,firmware_end_addr);
+   }
 
    if (machine->kernel_filename&&!kernel_entry) {
        kernel_start_addr=riscv_calc_kernel_start_addr(&s->soc[0],firmware_end_addr);
        kernel_entry=riscv_load_kernel(machine,&s->soc[0],kernel_start_addr,true,NULL);
+       printf("%s %lx\n",machine->kernel_filename,kernel_entry);
    }
-   printf("%s %lx\n",machine->kernel_filename,kernel_entry);
+
+   if (s->checkpoint) {
+       printf("%s \n",s->checkpoint);
+       printf("load result %d\n",load_checkpoint(machine, s->checkpoint));
+   }
 
     /* load the reset vector */
    riscv_setup_rom_reset_vec(machine, &s->soc[0], memmap[NEMU_DRAM].base,
@@ -154,6 +211,7 @@ static void nemu_machine_init(MachineState *machine)
     NEMUState *s = NEMU_MACHINE(machine);
     MemoryRegion *system_memory = get_system_memory();
     MemoryRegion *mask_rom = g_new(MemoryRegion, 1);
+    MemoryRegion *nemu_memory = g_new(MemoryRegion, 1);
     DeviceState *dev;
     char *soc_name;
     int i, base_hartid, hart_count;
@@ -210,9 +268,16 @@ static void nemu_machine_init(MachineState *machine)
     memory_region_add_subregion(system_memory, memmap[NEMU_MROM].base,
                                 mask_rom);
 
+    s->memory=g_malloc(machine->ram_size);
+    memory_region_init_ram_ptr(nemu_memory, NULL, "riscv.nemu.ram", machine->ram_size, s->memory);
+
     /* register system main memory (actual RAM) */
     memory_region_add_subregion(system_memory, memmap[NEMU_DRAM].base,
-        machine->ram);
+        nemu_memory);
+//
+//    /* register system main memory (actual RAM) */
+//    memory_region_add_subregion(system_memory, memmap[NEMU_DRAM].base,
+//        machine->ram);
 
 
     dev = qdev_new(TYPE_XILINX_UARTLITE);
@@ -231,7 +296,18 @@ static void nemu_machine_instance_init(Object *obj)
 {
 }
 
+static char* nemu_machine_get_checkpoint_path(Object *obj, Error **errp){
+    NEMUState *ms = NEMU_MACHINE(obj);
+    return g_strdup(ms->checkpoint);
+}
 
+static void nemu_machine_set_checkpoint_path(Object *obj, const char *value, Error **errp)
+{
+    NEMUState *ms = NEMU_MACHINE(obj);
+
+    g_free(ms->checkpoint);
+    ms->checkpoint = g_strdup(value);
+}
 
 static void nemu_machine_class_init(ObjectClass *oc, void *data)
 {
@@ -251,6 +327,8 @@ static void nemu_machine_class_init(ObjectClass *oc, void *data)
     /* platform instead of architectural choice */
     mc->cpu_cluster_has_numa_boundary = true;
     mc->default_ram_id = "riscv.nemu.ram";
+    object_class_property_add_str(oc, "checkpoint",
+        nemu_machine_get_checkpoint_path, nemu_machine_set_checkpoint_path);
 }
 
 static const TypeInfo nemu_machine_typeinfo = {

@@ -28,18 +28,22 @@
 #include "checkpoint/checkpoint.h"
 
 
+extern sync_info_t sync_info;
 void helper_nemu_trap(CPURISCVState *env,target_ulong a0){
-    printf("nemu_trap get insns %ld\n",env->profiling_insns);
+    CPUState *cs = env_cpu(env);
     fflush(stdout);
     if (a0==0x100) {
-        env->mie=(env->mie&(~(1<<7)));
-        env->mie=(env->mie&(~(1<<5)));
+//        env->mie=(env->mie&(~(1<<7)));
+//        env->mie=(env->mie&(~(1<<5)));
     }else if (a0==0x101) {
         env->kernel_insns=env->profiling_insns;
+        sync_info.workload_loaded_percpu[cs->cpu_index]=0x1;
         checkpoint.workload_loaded=true;
+        printf("cpu index %d nemu_trap get insns %ld\n",cs->cpu_index,env->profiling_insns);
     }else if (a0==0x102) {
+        printf("cpu index %d nemu_trap get insns %ld\n",cs->cpu_index,env->profiling_insns);
     }else {
-        qemu_system_shutdown_request(SHUTDOWN_CAUSE_HOST_QMP_QUIT);
+        //qemu_system_shutdown_request(SHUTDOWN_CAUSE_HOST_QMP_QUIT);
     }
 }
 

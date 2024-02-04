@@ -21,6 +21,7 @@
 #include "internal.h"
 #include "tcg/tcg.h"
 #include <stdio.h>
+#include "checkpoint/checkpoint.h"
 
 static TCGv_i64 *cpu_exec_count=NULL;
 
@@ -166,6 +167,7 @@ void translator_loop(CPUState *cpu, TranslationBlock *tb, int *max_insns,
     plugin_enabled = plugin_gen_tb_start(cpu, db);
     db->plugin_enabled = plugin_enabled;
 
+    checkpoint_gen_empty_callback();
     cpu_exec_count=ops->cpu_exec_count;
     while (true) {
         *max_insns = ++db->num_insns;
