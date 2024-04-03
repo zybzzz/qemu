@@ -1,27 +1,13 @@
 #include "checkpoint/checkpoint.h"
+#include "checkpoint/serializer_utils.h"
 #include "cpu_bits.h"
+#include "hw/boards.h"
+#include "hw/riscv/nemu.h"
 #include "qemu/error-report.h"
 #include "qemu/osdep.h"
-#include "qemu/log.h"
 #include "cpu.h"
-#include "tcg/tcg-op.h"
-#include "disas/disas.h"
-#include "exec/cpu_ldst.h"
-#include "exec/exec-all.h"
-#include "exec/helper-proto.h"
-#include "exec/helper-gen.h"
-
-#include "exec/translator.h"
-#include "exec/log.h"
-#include "semihosting/semihost.h"
-#include "instmap.h"
 #include <zlib.h>
-
 #include <zstd.h>
-
-#include "internals.h"
-#include "hw/intc/riscv_aclint.h"
-#include "qapi/qapi-commands-machine.h"
 
 static void serializeRegs(void) {
     CPUState *cs = qemu_get_cpu(0);
@@ -46,7 +32,9 @@ static void serializeRegs(void) {
 
 
     // V extertion
-//    if(env->virt_enabled) {
+    //    if(env->virt_enabled) {
+    //    }
+    if (riscv_has_ext(env, RVV)) {
         for(int i = 0; i < 32 * cpu->cfg.vlen / 64; i++) {
             cpu_physical_memory_write(VECTOR_REG_CPT_ADDR + i*8, &env->vreg[i], 8);
             if ((i+1)%(2)==0) {
@@ -54,7 +42,7 @@ static void serializeRegs(void) {
             }
         }
         info_report("Writting 32 * %d vector registers to checkpoint memory",cpu->cfg.vlen /64);
-//    }
+    }
 
     // CSR registers
     for(int i = 0; i < CSR_TABLE_SIZE; i++) {
@@ -128,77 +116,6 @@ static void serializeRegs(void) {
     csr_ops[0xc22].read(env, 0xc22, &tmp_vlenb);
     info_report("vlenb registers check: csr read %lx",tmp_vlenb);
 
-}
-
-
-
-static void serialize_pmem(uint64_t inst_count)
-{
-#define MEM_READ_BUF_SIZE 409600
-#define FILEPATH_BUF_SIZE 256
-    MemoryInfo * guest_pmem_info = qmp_query_memory_size_summary(NULL);
-    uint64_t guest_pmem_size = guest_pmem_info->base_memory;
-
-    uint8_t serialize_mem_buf[MEM_READ_BUF_SIZE];
-    char filepath[FILEPATH_BUF_SIZE];
-
-    uint64_t guest_pmem_start_addr = 0x80000000;
-    gzFile compressed_mem=NULL;
-
-//    size_t const compress_buffer_size = ZSTD_compressBound(guest_pmem_size);
-//    void* const compress_buffer = malloc(compress_buffer_size);
-//    assert(compress_buffer);
-//
-//    size_t const compress_size = ZSTD_compress(compress_buffer, compress_buffer_size, serialize_mem_buf, guest_pmem_size, 1);
-//    assert(compress_size<=compress_buffer_size&&compress_size!=0);
-//
-//    FILE *compress_file=fopen(filepath,"wb");
-//    size_t fw_size = fwrite(compress_buffer,1,compress_size,compress_file);
-//
-//    if (fw_size != (size_t)compress_size) {
-//        fprintf(stderr, "fwrite: %s : %s \n", filepath, strerror(errno));
-//    }
-//    if (fclose(compress_file)) {
-//        fprintf(stderr, "fclose: %s : %s \n", filepath, strerror(errno));
-//    }
-//
-//    free(compress_buffer);
-//
-    //prepare path
-    if (checkpoint.checkpoint_mode == SimpointCheckpointing) {
-        strcpy(filepath,((GString*)(g_list_first(path_manager.checkpoint_path_list)->data))->str);
-        g_mkdir_with_parents(g_path_get_dirname(filepath),0775);
-        compressed_mem=gzopen(filepath,"wb");
-    }
-
-    // else {
-    //     strcpy(filepath, path_manager.output_path->str);
-    //     assert(g_mkdir_with_parents(path_manager.output_path,0775)==0);
-    //     strcat(filepath, "_");
-    //     strcat(filepath, itoa(inst_count, str_num, 10));
-    //     strcat(filepath, "_.gz");
-    //     compressed_mem=gzopen(filepath);
-    // }
-
-    if (!compressed_mem) {
-        error_printf("filename %s can't open", filepath);
-        return;
-    }
-
-    for (int i = 0; i<guest_pmem_size/MEM_READ_BUF_SIZE; i++ ) {
-        cpu_physical_memory_read(guest_pmem_start_addr + i * MEM_READ_BUF_SIZE, serialize_mem_buf, MEM_READ_BUF_SIZE);
-        if (gzwrite(compressed_mem, serialize_mem_buf, (uint32_t) MEM_READ_BUF_SIZE) != MEM_READ_BUF_SIZE) {
-            error_printf("qmp_gzpmemsave write error");
-            goto exit;
-        }
-    }
-
-exit:
-    gzclose(compressed_mem);
-    info_report("success write into checkpoint file: %s",filepath);
-    uint64_t mtime;
-    cpu_physical_memory_read(MTIME_CMP_CPT_ADDR, &mtime, 8);
-    cpu_physical_memory_write(CLINT_MMIO+CLINT_MTIME, &mtime, 8);
 }
 
 static uint64_t get_next_instructions(void) {
@@ -308,7 +225,7 @@ static bool could_take_checkpoint(uint64_t icount){
     return true;
 }
 
-bool try_take_cpt(uint64_t icount) {
+bool single_core_try_take_cpt(uint64_t icount) {
     uint64_t workload_exec_insns=icount-get_kernel_insns();
     if (could_take_checkpoint(workload_exec_insns)) {
         serialize(workload_exec_insns);

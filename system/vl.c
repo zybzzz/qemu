@@ -2882,7 +2882,8 @@ static void init_path_manager(void){
         g_string_printf(path_manager.simpoint_path, "%s/%s",simpoints_path,path_manager.workload_name->str);
     }
 
-    //need prepare_simpoint_path
+    // Simpoint need prepare_simpoint_path
+    // Uniform need prepare interval
     init_serializer();
 
     if (checkpoint.checkpoint_mode == SimpointCheckpointing) {
@@ -2895,6 +2896,10 @@ static void init_path_manager(void){
 
         g_list_foreach(path_manager.checkpoint_path_list,check_path,NULL);
         g_list_foreach(simpoint_info.cpt_instructions,check_instrs,NULL);
+    }else if(checkpoint.checkpoint_mode == UniformCheckpointing){
+        path_manager.uniform_path=g_string_new(base_output_path);
+        g_string_printf(path_manager.uniform_path, "%s/%s",base_output_path,path_manager.workload_name->str);
+        info_report("prepare for checkpoint %s\n",path_manager.uniform_path->str);
     }
 }
 
@@ -3834,7 +3839,11 @@ void qemu_init(int argc, char **argv)
                     qdict_put_str(machine_opts_dict, "checkpoint", optarg);
                     break;
                 }
-
+            case QEMU_OPTION_boot_gcpt_restore:
+                {
+                    qdict_put_str(machine_opts_dict, "gcpt_restore", optarg);
+                    break;
+                }
             default:
                 error_report("Option not supported in this build");
                 exit(1);

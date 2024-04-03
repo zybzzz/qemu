@@ -29,22 +29,36 @@
 
 
 extern sync_info_t sync_info;
+extern GMutex sync_lock;
 void helper_nemu_trap(CPURISCVState *env,target_ulong a0){
+#define DISABLE_TIME_INTR 0x100
+#define NOTIFY_PROFILER 0x101
+#define NOTIFY_PROFILE_EXIT 0x102
+#define NOTIFY_WORKLOAD_EXIT 0x103
+#define GOOD_TRAP 0x0
+
     CPUState *cs = env_cpu(env);
     fflush(stdout);
-    if (a0==0x100) {
+
+    g_mutex_lock(&sync_lock);
+    if (a0==DISABLE_TIME_INTR) {
 //        env->mie=(env->mie&(~(1<<7)));
 //        env->mie=(env->mie&(~(1<<5)));
-    }else if (a0==0x101) {
+    }else if (a0==NOTIFY_PROFILER) {
+        // workload loaded
         env->kernel_insns=env->profiling_insns;
         sync_info.workload_loaded_percpu[cs->cpu_index]=0x1;
         checkpoint.workload_loaded=true;
         printf("cpu index %d nemu_trap get insns %ld\n",cs->cpu_index,env->profiling_insns);
-    }else if (a0==0x102) {
+    }else if (a0==NOTIFY_WORKLOAD_EXIT){
+        sync_info.workload_exit_percpu[cs->cpu_index]=0x1;
+        checkpoint.workload_exit=true;
+    }else if (a0==NOTIFY_PROFILE_EXIT) {
         printf("cpu index %d nemu_trap get insns %ld\n",cs->cpu_index,env->profiling_insns);
     }else {
-        //qemu_system_shutdown_request(SHUTDOWN_CAUSE_HOST_QMP_QUIT);
+//        qemu_system_shutdown_request(SHUTDOWN_CAUSE_HOST_QMP_QUIT);
     }
+    g_mutex_unlock(&sync_lock);
 }
 
 /* Exceptions processing helpers */
@@ -382,6 +396,9 @@ void helper_wfi(CPURISCVState *env)
     bool prv_u = env->priv == PRV_U;
     bool prv_s = env->priv == PRV_S;
 
+    //prv_s smode
+    //no smode and at uprv 
+    // mstatus_tw在没有其他因素的前提下可以在较低权限模式下执行，当tw=1时，如果wfi在任何较低的权限模式下执行，且未在特定于实现的限定期限内完成，则wfi可能导致非法指令异常。时限可能永远是0，在这种情况下，当tw=1时，wfi在低特权模式下始终产生非法指令异常。当不存在低于M的特权级，tw只读为0
     if (((prv_s || (!rvs && prv_u)) && get_field(env->mstatus, MSTATUS_TW)) ||
         (rvs && prv_u && !env->virt_enabled)) {
         riscv_raise_exception(env, RISCV_EXCP_ILLEGAL_INST, GETPC());

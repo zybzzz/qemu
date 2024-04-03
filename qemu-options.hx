@@ -170,9 +170,12 @@ SRST
     Define an SGX EPC section.
 ERST
 
-
 DEF("checkpoint", HAS_ARG, QEMU_OPTION_boot_checkpoint,
     "checkpoint: use checkpoint as memory\n",
+    QEMU_ARCH_RISCV)
+
+DEF("gcpt-restore", HAS_ARG, QEMU_OPTION_boot_gcpt_restore,
+    "gcpt_restore: use gcpt_restore overwrite memory\n",
     QEMU_ARCH_RISCV)
 
 DEF("cpt-interval", HAS_ARG, QEMU_OPTION_cpt_interval,

@@ -46,7 +46,9 @@
 #include "hw/intc/riscv_aclint.h"
 #include "hw/intc/sifive_plic.h"
 #include <libfdt.h>
+#include <unistd.h>
 #include <zstd.h>
+#include <zlib.h>
 
 enum {
     UART0_IRQ = 10,
@@ -62,6 +64,7 @@ enum{
     NEMU_PLIC,
     NEMU_CLINT,
     NEMU_UARTLITE,
+    NEMU_GCPT,
     NEMU_DRAM,
 };
 
@@ -84,7 +87,8 @@ static const MemMapEntry nemu_memmap[] = {
     [NEMU_PLIC]     =      {     0x3c000000,   0x4000000 },
     [NEMU_CLINT]    =      {     0x38000000,     0x10000 },
     [NEMU_UARTLITE] =      {     0x40600000,      0x1000 },
-    [NEMU_DRAM]     =      {     0x80000000,  0x80000000 },
+    [NEMU_GCPT]     =      {     0x50000000,   0x8000000 },
+    [NEMU_DRAM]     =      {     0x80000000,         0x0 },
 
 };
 
@@ -92,7 +96,7 @@ static int load_checkpoint(MachineState *machine,const char* checkpoint_path){
     NEMUState *s = NEMU_MACHINE(machine);
     int fd=-1;
     int compressed_size;
-    int decompressed_size;
+    int decompress_result;
     char *compress_file_buf=NULL;
     int load_compressed_size;
 
@@ -101,12 +105,14 @@ static int load_checkpoint(MachineState *machine,const char* checkpoint_path){
     if (checkpoint_path) {
         fd=open(checkpoint_path, O_RDONLY|O_BINARY);
         if (fd<0) {
+            error_report("Can't open checkpoint: %s",checkpoint_path);
             return -1;
         }
 
         compressed_size=lseek(fd, 0, SEEK_END);
         if (compressed_size == 0) {
-            return -2;
+            error_report("Checkpoint size could not be zero");
+            return -1;
         }
         lseek(fd, 0, SEEK_SET);
 
@@ -116,24 +122,59 @@ static int load_checkpoint(MachineState *machine,const char* checkpoint_path){
         if (load_compressed_size!=compressed_size) {
             close(fd);
             g_free(compress_file_buf);
-            return -3;
+            error_report("File read error, file size: %d, read size %d", compressed_size, load_compressed_size);
+            return -1;
         }
 
         close(fd);
 
         frame_content_size=ZSTD_getFrameContentSize(compress_file_buf, compressed_size);
 
-        decompressed_size=ZSTD_decompress(s->memory, frame_content_size, compress_file_buf, compressed_size);
+        decompress_result=ZSTD_decompress(s->memory, frame_content_size, compress_file_buf, compressed_size);
 
         g_free(compress_file_buf);
-//        if (decompressed_size!=frame_content_size) {
-//            return -4;
-//        }
 
-        printf("load checkpoint %s success, decompress size %d frame_content_size %ld\n",checkpoint_path,decompressed_size,frame_content_size);
+        if(ZSTD_isError(decompress_result)){
+            error_report("Checkpoint decompress error, %s", ZSTD_getErrorName(decompress_result));
+            return -1;
+        }
+
+        info_report("load checkpoint %s success, frame_content_size %ld", checkpoint_path, frame_content_size);
+        return 1;
     }else{
-        return -5;
+        error_report("Checkpoint path is NULL");
+        return -1;
     }
+}
+
+static int load_gcpt_restore(MachineState *machine, const char* gcpt_restore_path){
+    NEMUState *s = NEMU_MACHINE(machine);
+    int fd=-1;
+    int gcpt_restore_file_size=0;
+    int gcpt_restore_file_read_size=0;
+    if (gcpt_restore_path) {
+        fd=open(gcpt_restore_path, O_RDONLY|O_BINARY);
+        if (fd<0) {
+            error_report("Can't open gcpt_restore: %s", gcpt_restore_path);
+            return -1;
+        }
+        gcpt_restore_file_size=lseek(fd,0,SEEK_END);
+        // for now gcpt_restore cannot bigger than 1M
+        if (gcpt_restore_file_size==0||gcpt_restore_file_size>1*1024*1024) {
+            close(fd);
+            error_report("Gcpt size is zero or too large");
+            return -1;
+        }
+        lseek(fd,0,SEEK_SET);
+
+        if(read(fd, s->memory, gcpt_restore_file_size)!=gcpt_restore_file_size){
+            close(fd);
+            error_report("File read error, file size: %d, read size %d", gcpt_restore_file_size, gcpt_restore_file_read_size);
+            return -1;
+        }
+        close(fd);
+    }
+    info_report("load gcpt_restore success, load size %d, file_path %s", gcpt_restore_file_size, gcpt_restore_path);
 
     return 1;
 }
@@ -151,24 +192,32 @@ static void nemu_load_firmware(MachineState *machine){
 //                        riscv_default_firmware_name(&s->soc[0]));
 
 //    if (firmware_name) {
+
+   if (s->checkpoint) {
+       info_report("Load checkpoint: %s",s->checkpoint);
+       g_assert(load_checkpoint(machine, s->checkpoint));
+       if (s->gcpt_restore) {
+           info_report("Load gcpt_restore: %s",s->gcpt_restore);
+           g_assert(load_gcpt_restore(machine, s->gcpt_restore));
+       }
+       // load checkpoint donot need to load bios or kernel
+       goto prepare_start;
+   }
+
    firmware_end_addr = riscv_find_and_load_firmware(machine,riscv_default_firmware_name(&s->soc[0]),
                                                      memmap[NEMU_DRAM].base, NULL);
 
    if (machine->firmware&&firmware_end_addr) {
-       printf("%s %lx\n",machine->firmware,firmware_end_addr);
+       info_report("Firmware load: %s, firmware end addr: %lx\n",machine->firmware,firmware_end_addr);
    }
 
    if (machine->kernel_filename&&!kernel_entry) {
        kernel_start_addr=riscv_calc_kernel_start_addr(&s->soc[0],firmware_end_addr);
        kernel_entry=riscv_load_kernel(machine,&s->soc[0],kernel_start_addr,true,NULL);
-       printf("%s %lx\n",machine->kernel_filename,kernel_entry);
+       info_report("%s %lx",machine->kernel_filename,kernel_entry);
    }
 
-   if (s->checkpoint) {
-       printf("%s \n",s->checkpoint);
-       printf("load result %d\n",load_checkpoint(machine, s->checkpoint));
-   }
-
+prepare_start:
     /* load the reset vector */
    riscv_setup_rom_reset_vec(machine, &s->soc[0], memmap[NEMU_DRAM].base,
                               memmap[NEMU_MROM].base,
@@ -212,6 +261,7 @@ static void nemu_machine_init(MachineState *machine)
     MemoryRegion *system_memory = get_system_memory();
     MemoryRegion *mask_rom = g_new(MemoryRegion, 1);
     MemoryRegion *nemu_memory = g_new(MemoryRegion, 1);
+    MemoryRegion *nemu_gcpt = g_new(MemoryRegion, 1);
     DeviceState *dev;
     char *soc_name;
     int i, base_hartid, hart_count;
@@ -270,15 +320,19 @@ static void nemu_machine_init(MachineState *machine)
 
     s->memory=g_malloc(machine->ram_size);
     memory_region_init_ram_ptr(nemu_memory, NULL, "riscv.nemu.ram", machine->ram_size, s->memory);
-
     /* register system main memory (actual RAM) */
     memory_region_add_subregion(system_memory, memmap[NEMU_DRAM].base,
         nemu_memory);
+
+    s->gcpt_memory=g_malloc(nemu_memmap[NEMU_GCPT].size);
+    memory_region_init_ram_ptr(nemu_gcpt, NULL, "riscv.nemu.gcpt", nemu_memmap[NEMU_GCPT].size, s->gcpt_memory);
+
+    memory_region_add_subregion(system_memory, memmap[NEMU_GCPT].base,
+        nemu_gcpt);
 //
 //    /* register system main memory (actual RAM) */
 //    memory_region_add_subregion(system_memory, memmap[NEMU_DRAM].base,
 //        machine->ram);
-
 
     dev = qdev_new(TYPE_XILINX_UARTLITE);
     qdev_prop_set_chr(dev, "chardev", serial_hd(0));
@@ -309,9 +363,21 @@ static void nemu_machine_set_checkpoint_path(Object *obj, const char *value, Err
     ms->checkpoint = g_strdup(value);
 }
 
+static char* nemu_machine_get_gcpt_restore_path(Object *obj, Error **errp){
+    NEMUState *ms = NEMU_MACHINE(obj);
+    return g_strdup(ms->gcpt_restore);
+}
+
+static void nemu_machine_set_gcpt_restore_path(Object *obj, const char *value, Error **errp)
+{
+    NEMUState *ms = NEMU_MACHINE(obj);
+
+    g_free(ms->gcpt_restore);
+    ms->gcpt_restore = g_strdup(value);
+}
+
 static void nemu_machine_class_init(ObjectClass *oc, void *data)
 {
-//    char str[128];
     MachineClass *mc = MACHINE_CLASS(oc);
 
     mc->desc = "RISC-V NEMU board";
@@ -329,6 +395,9 @@ static void nemu_machine_class_init(ObjectClass *oc, void *data)
     mc->default_ram_id = "riscv.nemu.ram";
     object_class_property_add_str(oc, "checkpoint",
         nemu_machine_get_checkpoint_path, nemu_machine_set_checkpoint_path);
+    object_class_property_add_str(oc, "gcpt-restore",
+        nemu_machine_get_gcpt_restore_path, nemu_machine_set_gcpt_restore_path);
+
 }
 
 static const TypeInfo nemu_machine_typeinfo = {
@@ -338,7 +407,6 @@ static const TypeInfo nemu_machine_typeinfo = {
     .instance_init = nemu_machine_instance_init,
     .instance_size = sizeof(NEMUState),
 };
-
 
 static void nemu_machine_init_register_types(void)
 {

@@ -33,19 +33,9 @@ void checkpoint_gen_empty_callback(void){
     checkpoint_gen_empty_check_cb();
 }
 
-
-//static int temp_index=0;
-void helper_checkpoint_sync_check(uint32_t cpu_index, void *udata){
-    CPUState *cs=qemu_get_cpu(cpu_index);
+// static int temp_index=0;
+void helper_checkpoint_sync_check(uint32_t cpu_index, void *udata) {
+    CPUState *cs = qemu_get_cpu(cpu_index);
     CPURISCVState *env = cpu_env(cs);
-//    try_take_cpt(env->profiling_insns);
-    multi_core_try_take_cpt(env->profiling_insns,cpu_index);
-
-
-//    if (cpu_index!=temp_index) {
-//        printf("from my helper cpuindex %d, udata %p\n",cpu_index,udata);
-//        temp_index=cpu_index;
-//    }
+    try_take_cpt(env->profiling_insns, cpu_index);
 }
-
-

@@ -1023,8 +1023,6 @@ cpu_exec_loop(CPUState *cpu, SyncClocks *sc)
             }
 
             cpu_loop_exec_tb(cpu, tb, pc, &last_tb, &tb_exit);
-//            try_take_cpt(env->profiling_insns);
-//            multi_core_try_take_cpt(env->profiling_insns,cpu->cpu_index);
             /* Try to align the host and virtual clocks
                if the guest is in advance */
             align_clocks(sc, cpu);

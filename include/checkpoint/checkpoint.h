@@ -1,8 +1,8 @@
 #ifndef CHECKPOINT_H
 #define CHECKPOINT_H
 
-#define STRING_LEN 100
-#define SIMPOINT_IDX_MAX 100
+#define STRING_LEN              100
+#define SIMPOINT_IDX_MAX        100
 #include "qemu/osdep.h"
 
 #define CPT_MAGIC_BUMBER        0xbeef
@@ -52,6 +52,7 @@ typedef struct PathManager{
     GString *output_path;
 
     GString *simpoint_path;
+    GString *uniform_path;
     GList *checkpoint_path_list;
 }PathManager;
 
@@ -65,22 +66,24 @@ typedef struct Checkpoint{
     uint64_t next_uniform_point;
     uint64_t checkpoint_mode;
     bool workload_loaded;
+    bool workload_exit;
 }Checkpoint;
 
 typedef struct sync_info{
     uint8_t *workload_loaded_percpu;
+    uint8_t *workload_exit_percpu;
     uint64_t *workload_insns;
     uint64_t cpus;
     bool *checkpoint_end;
 }sync_info_t;
 
-
 extern SimpointInfo simpoint_info;
 extern PathManager path_manager;
 extern Checkpoint checkpoint;
 
-bool try_take_cpt(uint64_t icount);
+bool single_core_try_take_cpt(uint64_t icount);
 bool multi_core_try_take_cpt(uint64_t icount,uint64_t cpu_idx);
+bool try_take_cpt(uint64_t inst_count, uint64_t cpu_idx);
 void multicore_checkpoint_init(void);
 void checkpoint_gen_empty_callback(void);
 #endif

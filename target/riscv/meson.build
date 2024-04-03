@@ -24,7 +24,8 @@ riscv_ss.add(files(
   'zce_helper.c',
   'vcrypto_helper.c',
   'serializer.c',
-  'multicore.c'
+  'multicore.c',
+  'serializer_utils.c'
 ))
 
 riscv_system_ss = ss.source_set()

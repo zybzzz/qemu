@@ -23,10 +23,12 @@ struct NEMUState{
     RISCVHartArrayState soc[NEMU_CPUS_MAX];
 
     char* checkpoint;
+    char* gcpt_restore;
 
     NEMUConfig cfg;
 
     char* memory;
+    char* gcpt_memory;
 
     DeviceState *irqchip[NEMU_CPUS_MAX];
 };
