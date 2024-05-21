@@ -371,6 +371,14 @@ bool multi_core_try_take_cpt(uint64_t icount, uint64_t cpu_idx) {
     return false;
 }
 
+void try_set_mie(void *env){
+
+    if (try_take_single_core_checkpoint) {
+        ((CPURISCVState *)env)->mie=(((CPURISCVState *)env)->mie&(~(1<<7)));
+        ((CPURISCVState *)env)->mie=(((CPURISCVState *)env)->mie&(~(1<<5)));
+    }
+}
+
 bool try_take_cpt(uint64_t inst_count, uint64_t cpu_idx){
     if (try_take_single_core_checkpoint) {
         return single_core_try_take_cpt(inst_count);

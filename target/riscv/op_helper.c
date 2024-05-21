@@ -42,21 +42,27 @@ void helper_nemu_trap(CPURISCVState *env,target_ulong a0){
 
     g_mutex_lock(&sync_lock);
     if (a0==DISABLE_TIME_INTR) {
-//        env->mie=(env->mie&(~(1<<7)));
-//        env->mie=(env->mie&(~(1<<5)));
+        try_set_mie(env);
     }else if (a0==NOTIFY_PROFILER) {
         // workload loaded
         env->kernel_insns=env->profiling_insns;
+        // multi core checkpoint
         sync_info.workload_loaded_percpu[cs->cpu_index]=0x1;
+        // single core
         checkpoint.workload_loaded=true;
         printf("cpu index %d nemu_trap get insns %ld\n",cs->cpu_index,env->profiling_insns);
     }else if (a0==NOTIFY_WORKLOAD_EXIT){
+        // sig multi core exit
         sync_info.workload_exit_percpu[cs->cpu_index]=0x1;
+        //
         checkpoint.workload_exit=true;
+        printf("Notify cpu index %d nemu_trap get insns %ld get worklaod exit\n",cs->cpu_index,env->profiling_insns);
     }else if (a0==NOTIFY_PROFILE_EXIT) {
+        // sig profiling exit
         printf("cpu index %d nemu_trap get insns %ld\n",cs->cpu_index,env->profiling_insns);
     }else {
-//        qemu_system_shutdown_request(SHUTDOWN_CAUSE_HOST_QMP_QUIT);
+        // exit
+        qemu_system_shutdown_request(SHUTDOWN_CAUSE_HOST_QMP_QUIT);
     }
     g_mutex_unlock(&sync_lock);
 }

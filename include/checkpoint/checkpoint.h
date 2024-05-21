@@ -86,4 +86,5 @@ bool multi_core_try_take_cpt(uint64_t icount,uint64_t cpu_idx);
 bool try_take_cpt(uint64_t inst_count, uint64_t cpu_idx);
 void multicore_checkpoint_init(void);
 void checkpoint_gen_empty_callback(void);
+void try_set_mie(void *env);
 #endif
