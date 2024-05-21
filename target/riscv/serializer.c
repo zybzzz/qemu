@@ -6,117 +6,9 @@
 #include "qemu/error-report.h"
 #include "qemu/osdep.h"
 #include "cpu.h"
+#include "qemu/typedefs.h"
 #include <zlib.h>
 #include <zstd.h>
-
-static void serializeRegs(void) {
-    CPUState *cs = qemu_get_cpu(0);
-    RISCVCPU *cpu = RISCV_CPU(&cs->parent_obj);
-    CPURISCVState *env = cpu_env(cs);
-
-
-    for(int i = 0 ; i < 32; i++) {
-        cpu_physical_memory_write(INT_REG_CPT_ADDR + i*8, &env->gpr[i], 8);
-        printf("gpr %04d value %016lx ",i,env->gpr[i]);
-        if ((i+1)%4==0) {
-            printf("\n");
-        }
-    }
-    info_report("Writting int registers to checkpoint memory");
-
-    // F extertion
-    for(int i = 0 ; i < 32; i++) {
-        cpu_physical_memory_write(FLOAT_REG_CPT_ADDR + i*8, &env->fpr[i], 8);
-    }
-    info_report("Writting float registers to checkpoint memory");
-
-
-    // V extertion
-    //    if(env->virt_enabled) {
-    //    }
-    if (riscv_has_ext(env, RVV)) {
-        for(int i = 0; i < 32 * cpu->cfg.vlen / 64; i++) {
-            cpu_physical_memory_write(VECTOR_REG_CPT_ADDR + i*8, &env->vreg[i], 8);
-            if ((i+1)%(2)==0) {
-                info_report("[%lx]: 0x%016lx_%016lx",(uint64_t)VECTOR_REG_CPT_ADDR+(i-1)*8,env->vreg[i-1],env->vreg[i]);
-            }
-        }
-        info_report("Writting 32 * %d vector registers to checkpoint memory",cpu->cfg.vlen /64);
-    }
-
-    // CSR registers
-    for(int i = 0; i < CSR_TABLE_SIZE; i++) {
-        if(csr_ops[i].read != NULL) {
-            target_ulong val;
-            csr_ops[i].read(env, i, &val);
-            cpu_physical_memory_write(CSR_REG_CPT_ADDR + i * 8, &val, 8);
-            if (val!=0) {
-                info_report("csr id %x name %s value %lx",i,csr_ops[i].name,val);
-            }
-        }
-    }
-    info_report("Writting csr registers to checkpoint memory");
-    uint64_t tmp_satp=0;
-    cpu_physical_memory_read(CSR_REG_CPT_ADDR + 0x180 * 8, &tmp_satp, 8);
-    info_report("Satp from env %lx, Satp from memory %lx",env->satp, tmp_satp);
-
-    uint64_t flag_val;
-    flag_val = CPT_MAGIC_BUMBER;
-    cpu_physical_memory_write(BOOT_FLAG_ADDR, &flag_val, 8);
-
-    uint64_t tmp_mip=env->mip;
-    tmp_mip=set_field(tmp_mip, MIP_MTIP, 0);
-    tmp_mip=set_field(tmp_mip, MIP_STIP, 0);
-    cpu_physical_memory_write(CSR_REG_CPT_ADDR + 0x344 * 8, &tmp_mip, 8);
-    info_report("Writting mip registers to checkpoint memory: %lx",tmp_mip);
-
-    uint64_t tmp_mstatus=env->mstatus;
-    tmp_mstatus=set_field(tmp_mstatus, MSTATUS_MPIE, get_field(tmp_mstatus, MSTATUS_MIE));
-    tmp_mstatus=set_field(tmp_mstatus, MSTATUS_MIE, 0);
-    tmp_mstatus=set_field(tmp_mstatus, MSTATUS_MPP, env->priv);
-    cpu_physical_memory_write(CSR_REG_CPT_ADDR + 0x300 * 8, &tmp_mstatus, 8);
-    info_report("Writting mstatus registers to checkpoint memory: %lx mpp %lx",tmp_mstatus,env->priv);
-
-    uint64_t tmp_mepc=env->pc;
-    cpu_physical_memory_write(CSR_REG_CPT_ADDR + 0x341 * 8, &tmp_mepc, 8);
-    info_report("Writting mepc registers to checkpoint memory: %lx",tmp_mepc);
-
-    cpu_physical_memory_write(PC_CPT_ADDR, &env->pc, 8);
-    cpu_physical_memory_write(MODE_CPT_ADDR, &env->priv, 8);
-
-    uint64_t tmp_mtime_cmp;
-    cpu_physical_memory_read(CLINT_MMIO+CLINT_MTIMECMP, &tmp_mtime_cmp, 8);
-    cpu_physical_memory_write(MTIME_CPT_ADDR, &tmp_mtime_cmp, 8);
-    info_report("Writting mtime_cmp registers to checkpoint memory: %lx %x",tmp_mtime_cmp,CLINT_MMIO+CLINT_MTIMECMP);
-
-    uint64_t tmp_mtime;
-    cpu_physical_memory_read(CLINT_MMIO+CLINT_MTIME, &tmp_mtime, 8);
-    cpu_physical_memory_write(MTIME_CMP_CPT_ADDR, &tmp_mtime, 8);
-    info_report("Writting mtime registers to checkpoint memory: %lx %x",tmp_mtime,CLINT_MMIO+CLINT_MTIME);
-
-    uint64_t tmp_vstart;
-    csr_ops[0x008].read(env, 0x008, &tmp_vstart);
-    info_report("vstart registers check: env %lx csr read %lx",env->vstart,tmp_vstart);
-    uint64_t tmp_vxsat;
-    csr_ops[0x009].read(env, 0x009, &tmp_vxsat);
-    info_report("vxsat registers check: env %lx csr read %lx",env->vxsat,tmp_vxsat);
-    uint64_t tmp_vxrm;
-    csr_ops[0x00a].read(env, 0x00a, &tmp_vxrm);
-    info_report("vxrm registers check: csr read %lx",tmp_vxrm);
-    uint64_t tmp_vcsr;
-    csr_ops[0x00f].read(env, 0x00f, &tmp_vcsr);
-    info_report("vcsr registers check: csr read %lx",tmp_vcsr);
-    uint64_t tmp_vl;
-    csr_ops[0xc20].read(env, 0xc20, &tmp_vl);
-    info_report("vl registers check: env %lx csr read %lx",env->vl,tmp_vl);
-    uint64_t tmp_vtype;
-    csr_ops[0xc21].read(env, 0xc21, &tmp_vtype);
-    info_report("vtype registers check: env %lx csr read %lx",env->vtype,tmp_vtype);
-    uint64_t tmp_vlenb;
-    csr_ops[0xc22].read(env, 0xc22, &tmp_vlenb);
-    info_report("vlenb registers check: csr read %lx",tmp_vlenb);
-
-}
 
 static uint64_t get_next_instructions(void) {
     GList* first_insns_item=g_list_first(simpoint_info.cpt_instructions);
@@ -205,8 +97,10 @@ static void notify_taken(uint64_t icount) {
 }
 
 static void serialize(uint64_t icount) {
-    serializeRegs();
-    serialize_pmem(icount);
+    MachineState *ms = MACHINE(qdev_get_machine());
+    NEMUState *ns = NEMU_MACHINE(ms);
+    serializeRegs(0, ns->memory, &single_core_rvgcvh_default_memlayout, 1, 0);
+    serialize_pmem(icount, false, NULL, 0);
 }
 
 static bool could_take_checkpoint(uint64_t icount){

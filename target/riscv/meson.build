@@ -25,7 +25,11 @@ riscv_ss.add(files(
   'vcrypto_helper.c',
   'serializer.c',
   'multicore.c',
-  'serializer_utils.c'
+  'serializer_utils.c',
+  'checkpoint.pb.c',
+  'pb_common.c',
+  'pb_decode.c',
+  'pb_encode.c'
 ))
 
 riscv_system_ss = ss.source_set()
