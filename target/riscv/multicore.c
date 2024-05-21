@@ -14,13 +14,20 @@
 #include <zstd.h>
 #include "hw/boards.h"
 #include "checkpoint/checkpoint.h"
+#include "checkpoint/checkpoint.pb.h"
 #include "checkpoint/serializer_utils.h"
+#include "sysemu/cpu-timers.h"
 #include "sysemu/runstate.h"
-
 
 GMutex sync_lock;
 sync_info_t sync_info;
 GCond sync_signal;
+
+static uint64_t global_mtime = 0;
+
+static void set_global_mtime(void){
+    cpu_physical_memory_read(CLINT_MMIO+CLINT_MTIME, &global_mtime, 8);
+}
 
 static bool try_take_single_core_checkpoint = false;
 void multicore_checkpoint_init(void) {
@@ -116,7 +123,23 @@ static bool could_take_checkpoint(uint64_t workload_exec_insns,uint64_t cpu_idx)
     return true;
 
 wait:
+#ifndef NO_PRINT
     printf("cpu %ld get wait\n",cpu_idx);
+#endif
+
+    uint64_t wait_cpus = 0;
+    for (int i = 0; i<sync_info.cpus; i++) {
+        // idx i hart less than limit instructions and workload not exit, this hart could wait
+        if (sync_info.workload_insns[i]>limit_instructions()) {
+            if (sync_info.workload_exit_percpu[i]!=0x1) {
+                wait_cpus += 1;
+            }
+        }
+    }
+    if (wait_cpus == 1) {
+        cpu_disable_ticks();
+        set_global_mtime();
+    }
 
     // wait for checkpoint thread set flag true
     while (!sync_info.checkpoint_end[cpu_idx]) {
@@ -124,7 +147,9 @@ wait:
     }
 
     // printf("cpu: %ld get the sync end, limit instructions: %ld\n",cpu_idx,workload_exec_insns);
+#ifndef NO_PRINT
     printf("cpu: %ld get the sync end\n",cpu_idx);
+#endif
 
     //reset status
     sync_info.checkpoint_end[cpu_idx]=false;
@@ -222,6 +247,8 @@ bool multi_core_try_take_cpt(uint64_t icount, uint64_t cpu_idx) {
 
         // reset self flag
         sync_info.checkpoint_end[cpu_idx]=false;
+
+        cpu_enable_ticks();
 
         g_cond_broadcast(&sync_signal);
 
