@@ -5,7 +5,7 @@
 #include "hw/riscv/riscv_hart.h"
 #include "hw/sysbus.h"
 
-#define NEMU_CPUS_MAX 8
+#define NEMU_CPUS_MAX 128
 #define NEMU_CPUS_MIN 1
 
 #define TYPE_NEMU_MACHINE MACHINE_TYPE_NAME("nemu")

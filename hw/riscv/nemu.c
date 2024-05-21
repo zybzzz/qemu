@@ -301,11 +301,13 @@ static void nemu_machine_init(MachineState *machine)
         riscv_aclint_swi_create(
             memmap[NEMU_CLINT].base + i * memmap[NEMU_CLINT].size,
             base_hartid, hart_count, false);
+
+        // mtime = swi
         riscv_aclint_mtimer_create(memmap[NEMU_CLINT].base +
                 i * memmap[NEMU_CLINT].size + RISCV_ACLINT_SWI_SIZE,
-            RISCV_ACLINT_DEFAULT_MTIMER_SIZE, base_hartid, hart_count,
+            memmap[NEMU_CLINT].size, base_hartid, hart_count,
             RISCV_ACLINT_DEFAULT_MTIMECMP, RISCV_ACLINT_DEFAULT_MTIME,
-            RISCV_ACLINT_DEFAULT_TIMEBASE_FREQ, true);
+            RISCV_ACLINT_DEFAULT_TIMEBASE_FREQ, false);
 
         /* Per-socket interrupt controller */
         s->irqchip[i] = nemu_create_plic(memmap, i,
@@ -318,12 +320,14 @@ static void nemu_machine_init(MachineState *machine)
     memory_region_add_subregion(system_memory, memmap[NEMU_MROM].base,
                                 mask_rom);
 
+    // memory
     s->memory=g_malloc(machine->ram_size);
     memory_region_init_ram_ptr(nemu_memory, NULL, "riscv.nemu.ram", machine->ram_size, s->memory);
     /* register system main memory (actual RAM) */
     memory_region_add_subregion(system_memory, memmap[NEMU_DRAM].base,
         nemu_memory);
 
+    // gcpt device
     s->gcpt_memory=g_malloc(nemu_memmap[NEMU_GCPT].size);
     memory_region_init_ram_ptr(nemu_gcpt, NULL, "riscv.nemu.gcpt", nemu_memmap[NEMU_GCPT].size, s->gcpt_memory);
 
@@ -334,6 +338,7 @@ static void nemu_machine_init(MachineState *machine)
 //    memory_region_add_subregion(system_memory, memmap[NEMU_DRAM].base,
 //        machine->ram);
 
+    // uartlite
     dev = qdev_new(TYPE_XILINX_UARTLITE);
     qdev_prop_set_chr(dev, "chardev", serial_hd(0));
     sysbus_realize_and_unref(SYS_BUS_DEVICE(dev), &error_fatal);
