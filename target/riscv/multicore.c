@@ -111,15 +111,6 @@ static bool could_take_checkpoint(uint64_t workload_exec_insns,uint64_t cpu_idx)
         goto failed;
     }
 
-    if (get_env_cpu_mode(cpu_idx)==PRV_M) {
-        #ifndef NO_PRINT
-        if (r < 10) {
-            fprintf(stderr,"%s: cpu %ld is in m mode, insns: %lu\n", __func__, cpu_idx, workload_exec_insns);
-        }
-        #endif
-        goto failed;
-    }
-
     // all cpu check, do not wait for before workload
     for (int i = 0; i<sync_info.cpus; i++) {
         if (sync_info.workload_loaded_percpu[i]!=0x1) {
