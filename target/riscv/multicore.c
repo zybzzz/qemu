@@ -8,6 +8,7 @@
 #include "qemu/typedefs.h"
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/cdefs.h>
 #include <zlib.h>
@@ -23,9 +24,12 @@ GMutex sync_lock;
 sync_info_t sync_info;
 GCond sync_signal;
 
+#define NO_PRINT
+
 static uint64_t global_mtime = 0;
 
-static void set_global_mtime(void){
+__attribute__ ((unused))
+static void set_global_mtime(void){ // maybe unused
     cpu_physical_memory_read(CLINT_MMIO+CLINT_MTIME, &global_mtime, 8);
 }
 
@@ -74,30 +78,56 @@ static void update_uniform_limit_inst(void){
     checkpoint.next_uniform_point+=checkpoint.cpt_interval;
 }
 
-static int get_env_cpu_mode(uint64_t cpu_idx){
+__attribute_maybe_unused__ static int get_env_cpu_mode(uint64_t cpu_idx){
     CPUState *cs = qemu_get_cpu(cpu_idx);
     CPURISCVState *env = cpu_env(cs);
     return env->priv;
 }
 
 static bool could_take_checkpoint(uint64_t workload_exec_insns,uint64_t cpu_idx) {
+    #ifndef NO_PRINT
+    __attribute__ ((unused)) int r = rand() % 100000;
+    if (r < 10) {
+        fprintf(stderr,"%s: cpu %ld trying to obtain lock\n", __func__, cpu_idx);
+    }
+    #endif
     g_mutex_lock(&sync_lock);
     // single cpu check
     if (sync_info.workload_loaded_percpu[cpu_idx]!=0x1) {
+        #ifndef NO_PRINT
+        if (r < 10) {
+            fprintf(stderr,"%s: cpu %ld not seen before workload\n", __func__, cpu_idx);
+        }
+        #endif
         goto failed;
     }
 
     if (sync_info.workload_exit_percpu[cpu_idx]==0x1) {
+        #ifndef NO_PRINT
+        if (r < 10) {
+            fprintf(stderr,"%s: cpu %ld has exited\n", __func__, cpu_idx);
+        }
+        #endif
         goto failed;
     }
 
     if (get_env_cpu_mode(cpu_idx)==PRV_M) {
+        #ifndef NO_PRINT
+        if (r < 10) {
+            fprintf(stderr,"%s: cpu %ld is in m mode, insns: %lu\n", __func__, cpu_idx, workload_exec_insns);
+        }
+        #endif
         goto failed;
     }
 
     // all cpu check, do not wait for before workload
     for (int i = 0; i<sync_info.cpus; i++) {
         if (sync_info.workload_loaded_percpu[i]!=0x1) {
+            #ifndef NO_PRINT
+            if (r < 10) {
+                fprintf(stderr,"%s: cpu %ld: other core has not executed before_workload\n", __func__, cpu_idx);
+            }
+            #endif
             goto failed;
         }
     }
@@ -106,6 +136,11 @@ static bool could_take_checkpoint(uint64_t workload_exec_insns,uint64_t cpu_idx)
     if (workload_exec_insns>=limit_instructions()) {
         sync_info.workload_insns[cpu_idx]=workload_exec_insns;
     } else {
+        #ifndef NO_PRINT
+        if (r < 10) {
+            fprintf(stderr,"%s: cpu %ld: has not reached limit insns: %lu\n", __func__, cpu_idx, workload_exec_insns);
+        }
+        #endif
         goto failed;
     }
 
@@ -124,7 +159,7 @@ static bool could_take_checkpoint(uint64_t workload_exec_insns,uint64_t cpu_idx)
 
 wait:
 #ifndef NO_PRINT
-    printf("cpu %ld get wait\n",cpu_idx);
+    fprintf(stderr,"cpu %ld get wait with insns: %lu\n", cpu_idx, sync_info.workload_insns[cpu_idx]);
 #endif
 
     uint64_t wait_cpus = 0;
@@ -146,9 +181,9 @@ wait:
         g_cond_wait(&sync_signal, &sync_lock);
     }
 
-    // printf("cpu: %ld get the sync end, limit instructions: %ld\n",cpu_idx,workload_exec_insns);
+    // fprintf(stderr,"cpu: %ld get the sync end, limit instructions: %ld\n",cpu_idx,workload_exec_insns);
 #ifndef NO_PRINT
-    printf("cpu: %ld get the sync end\n",cpu_idx);
+    fprintf(stderr,"cpu: %ld get the sync end\n",cpu_idx);
 #endif
 
     //reset status
@@ -193,7 +228,10 @@ __attribute_maybe_unused__ static void serialize(uint64_t memory_addr,int cpu_in
     serialize_pmem(inst_count, false, hardware_status_buffer, cpt_header.cpt_offset + 1024 * 1024 *cpus);
 }
 
-static bool all_cpu_exit(void){
+static bool all_cpu_exit(uint64_t cpu_idx){
+    #ifndef NO_PRINT
+    fprintf(stderr,"%s: cpu %ld trying to obtain lock\n", __func__, cpu_idx);
+    #endif
     g_mutex_lock(&sync_lock);
     int load_worload_num=0;
     int exit_worload_num=0;
@@ -222,6 +260,9 @@ bool multi_core_try_take_cpt(uint64_t icount, uint64_t cpu_idx) {
     }
 
     if (could_take_checkpoint(workload_insns(cpu_idx), cpu_idx)) {
+        #ifndef NO_PRINT
+        fprintf(stderr,"%s: cpu %ld could take cpt, is trying to obtain lock\n", __func__, cpu_idx);
+        #endif
         g_mutex_lock(&sync_lock);
 
         //start checkpoint
@@ -233,11 +274,11 @@ bool multi_core_try_take_cpt(uint64_t icount, uint64_t cpu_idx) {
         }
 
         #ifndef NO_PRINT
-        printf("cpu: %ld get the broadcast, limit instructions: %ld\n",cpu_idx,limit_instructions());
+        fprintf(stderr,"cpu: %ld get the broadcast, limit instructions: %ld\n",cpu_idx,limit_instructions());
         #endif
         for (int i = 0; i<sync_info.cpus; i++) {
             #ifndef NO_PRINT
-            printf("cpu %d, insns %ld\n",i,sync_info.workload_insns[i]);
+            fprintf(stderr,"cpu %d, insns %ld\n",i,sync_info.workload_insns[i]);
             #endif
         }
 
@@ -255,7 +296,7 @@ bool multi_core_try_take_cpt(uint64_t icount, uint64_t cpu_idx) {
         g_mutex_unlock(&sync_lock);
     }
 
-    if (checkpoint.workload_exit && all_cpu_exit()) {
+    if (checkpoint.workload_exit && all_cpu_exit(cpu_idx)) {
         // exit;
         qemu_system_shutdown_request(SHUTDOWN_CAUSE_HOST_QMP_QUIT);
     }
