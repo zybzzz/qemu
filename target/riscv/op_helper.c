@@ -43,24 +43,25 @@ void helper_nemu_trap(CPURISCVState *env,target_ulong a0){
     g_mutex_lock(&sync_lock);
     if (a0==DISABLE_TIME_INTR) {
         try_set_mie(env);
-    }else if (a0==NOTIFY_PROFILER) {
+    } else if (a0 == NOTIFY_PROFILER) {
         // workload loaded
-        env->last_seen_insns=env->profiling_insns;
+        env->last_seen_insns = env->profiling_insns;
         // multi core checkpoint
-        sync_info.workload_loaded_percpu[cs->cpu_index]=0x1;
+        sync_info.workload_loaded_percpu[cs->cpu_index] = 0x1;
         // single core
-        checkpoint.workload_loaded=true;
-        printf("cpu index %d nemu_trap get insns %ld\n",cs->cpu_index,env->profiling_insns);
-    }else if (a0==NOTIFY_WORKLOAD_EXIT){
+        checkpoint.workload_loaded = true;
+        printf("cpu index %d nemu_trap get insns %ld\n", cs->cpu_index,
+               env->profiling_insns);
+    } else if (a0 == NOTIFY_WORKLOAD_EXIT) {
         // sig multi core exit
         sync_info.workload_exit_percpu[cs->cpu_index]=0x1;
         //
         checkpoint.workload_exit=true;
         printf("Notify cpu index %d nemu_trap get insns %ld get worklaod exit\n",cs->cpu_index,env->profiling_insns);
-    }else if (a0==NOTIFY_PROFILE_EXIT) {
+    } else if (a0 == NOTIFY_PROFILE_EXIT) {
         // sig profiling exit
         printf("cpu index %d nemu_trap get insns %ld\n",cs->cpu_index,env->profiling_insns);
-    }else {
+    } else {
         // exit
         qemu_system_shutdown_request(SHUTDOWN_CAUSE_HOST_QMP_QUIT);
     }

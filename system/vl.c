@@ -2775,7 +2775,6 @@ static void init_serializer(void){
         info_report("Taking simpoint checkpionts with profiling interval %lu",
             checkpoint.cpt_interval);
 
-
         GString *simpoints_path=g_string_new(NULL);
         GString *weights_path=g_string_new(NULL);
         g_string_printf(simpoints_path,"%s/%s",path_manager.simpoint_path->str,"simpoints0");
