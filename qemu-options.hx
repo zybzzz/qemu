@@ -182,6 +182,10 @@ DEF("cpt-interval", HAS_ARG, QEMU_OPTION_cpt_interval,
     "cpt interval: the profiling period for simpoint; the checkpoint interval for uniform cpt\n",
     QEMU_ARCH_RISCV)
 
+DEF("sync-interval", HAS_ARG, QEMU_OPTION_sync_interval,
+    "sync interval: the interval of cycles to sync progress of all cores\n",
+    QEMU_ARCH_RISCV)
+
 SRST
 ``cpt interval: the profiling period for simpoint; the checkpoint interval for uniform cpt\n``
     Define an SGX EPC section.

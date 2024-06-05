@@ -45,7 +45,7 @@ void helper_nemu_trap(CPURISCVState *env,target_ulong a0){
         try_set_mie(env);
     }else if (a0==NOTIFY_PROFILER) {
         // workload loaded
-        env->kernel_insns=env->profiling_insns;
+        env->last_seen_insns=env->profiling_insns;
         // multi core checkpoint
         sync_info.workload_loaded_percpu[cs->cpu_index]=0x1;
         // single core
@@ -412,6 +412,7 @@ void helper_wfi(CPURISCVState *env)
                (prv_u || (prv_s && get_field(env->hstatus, HSTATUS_VTW)))) {
         riscv_raise_exception(env, RISCV_EXCP_VIRT_INSTRUCTION_FAULT, GETPC());
     } else {
+        try_take_cpt(env->profiling_insns, cs->cpu_index, true);
         cs->halted = 1;
         cs->exception_index = EXCP_HLT;
         cpu_loop_exit(cs);

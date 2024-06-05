@@ -465,7 +465,7 @@ struct CPUArchState {
     hwaddr fdt_addr;
 
     uint64_t profiling_insns;
-    uint64_t kernel_insns;
+    uint64_t last_seen_insns;
 
 #ifdef CONFIG_KVM
     /* kvm timer */

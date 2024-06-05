@@ -1,6 +1,7 @@
 #ifndef CHECKPOINT_H
 #define CHECKPOINT_H
 
+#include <stdint.h>
 #define STRING_LEN              100
 #define SIMPOINT_IDX_MAX        100
 #include "qemu/osdep.h"
@@ -70,10 +71,13 @@ typedef struct Checkpoint{
 }Checkpoint;
 
 typedef struct sync_info{
+    uint64_t sync_interval;
     uint8_t *workload_loaded_percpu;
     uint8_t *workload_exit_percpu;
     uint64_t *workload_insns;
+    bool *early_exit;  // such as wfi
     uint64_t cpus;
+    uint64_t next_sync_point;
     bool *checkpoint_end;
 }sync_info_t;
 
@@ -82,8 +86,8 @@ extern PathManager path_manager;
 extern Checkpoint checkpoint;
 
 bool single_core_try_take_cpt(uint64_t icount);
-bool multi_core_try_take_cpt(uint64_t icount,uint64_t cpu_idx);
-bool try_take_cpt(uint64_t inst_count, uint64_t cpu_idx);
+bool multi_core_try_take_cpt(uint64_t icount,uint64_t cpu_idx, bool exit_sync_period);
+bool try_take_cpt(uint64_t inst_count, uint64_t cpu_idx, bool exit_sync_period);
 void multicore_checkpoint_init(void);
 void checkpoint_gen_empty_callback(void);
 void try_set_mie(void *env);

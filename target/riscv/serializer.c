@@ -34,7 +34,7 @@ static int get_env_cpu_mode(void){
 static uint64_t get_kernel_insns(void){
     CPUState *cs = qemu_get_cpu(0);
     CPURISCVState *env = cpu_env(cs);
-    return env->kernel_insns;
+    return env->last_seen_insns;
 }
 
 static bool instrsCouldTakeCpt(uint64_t icount) {

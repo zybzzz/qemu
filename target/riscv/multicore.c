@@ -1,11 +1,13 @@
 #include "checkpoint/checkpoint.h"
 #include "cpu_bits.h"
 #include "exec/cpu-common.h"
+#include "hw/core/cpu.h"
 #include "hw/qdev-core.h"
 #include "hw/riscv/nemu.h"
 #include "qemu/error-report.h"
 #include "cpu.h"
 #include "qemu/typedefs.h"
+#include <stdbool.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -50,6 +52,7 @@ void multicore_checkpoint_init(void) {
     sync_info.workload_exit_percpu=g_malloc0(cpus*sizeof(uint8_t));
     sync_info.workload_loaded_percpu=g_malloc0(cpus*sizeof(uint8_t));
     sync_info.workload_insns=g_malloc0(cpus*sizeof(uint64_t));
+    sync_info.early_exit=g_malloc0(cpus*sizeof(bool));
     sync_info.checkpoint_end=g_malloc0(cpus*sizeof(bool));
     g_mutex_unlock(&sync_lock);
 
@@ -58,7 +61,7 @@ void multicore_checkpoint_init(void) {
 static uint64_t workload_insns(int cpu_index) {
     CPUState *cs=qemu_get_cpu(cpu_index);
     CPURISCVState *env = cpu_env(cs);
-    return env->profiling_insns-env->kernel_insns;
+    return env->profiling_insns-env->last_seen_insns;
 }
 
 // prepare merge single core checkpoint
@@ -66,7 +69,7 @@ static uint64_t get_next_instructions(void){
     return 0;
 }
 
-static uint64_t limit_instructions(void) {
+static uint64_t cpt_limit_instructions(void) {
     if (checkpoint.checkpoint_mode==UniformCheckpointing) {
         return checkpoint.next_uniform_point;
     }else {
@@ -74,8 +77,16 @@ static uint64_t limit_instructions(void) {
     }
 }
 
-static void update_uniform_limit_inst(void){
-    checkpoint.next_uniform_point+=checkpoint.cpt_interval;
+static uint64_t sync_limit_instructions(void) {
+    return sync_info.sync_interval;
+}
+
+static void update_uniform_limit_inst(bool taken_cpt){
+    if (taken_cpt) {
+        checkpoint.next_uniform_point += checkpoint.cpt_interval;
+    }
+    sync_info.next_sync_point += sync_info.sync_interval;
+    memset(sync_info.early_exit, 0, sync_info.cpus*sizeof(bool));
 }
 
 __attribute_maybe_unused__ static int get_env_cpu_mode(uint64_t cpu_idx){
@@ -84,65 +95,98 @@ __attribute_maybe_unused__ static int get_env_cpu_mode(uint64_t cpu_idx){
     return env->priv;
 }
 
-static bool could_take_checkpoint(uint64_t workload_exec_insns,uint64_t cpu_idx) {
-    #ifndef NO_PRINT
-    __attribute__ ((unused)) int r = rand() % 100000;
+static bool sync_and_check_take_checkpoint(uint64_t workload_exec_insns,
+                                           uint64_t cpu_idx,
+                                           bool *should_take_cpt,
+                                           bool early_exit) {
+#ifndef NO_PRINT
+    __attribute__((unused)) int r = rand() % 100000;
     if (r < 10) {
-        fprintf(stderr,"%s: cpu %ld trying to obtain lock\n", __func__, cpu_idx);
+        fprintf(stderr, "%s: cpu %ld trying to obtain lock\n", __func__, cpu_idx);
     }
-    #endif
+#endif
     g_mutex_lock(&sync_lock);
     // single cpu check
     if (sync_info.workload_loaded_percpu[cpu_idx]!=0x1) {
-        #ifndef NO_PRINT
+#ifndef NO_PRINT
         if (r < 10) {
             fprintf(stderr,"%s: cpu %ld not seen before workload\n", __func__, cpu_idx);
         }
-        #endif
+#endif
         goto failed;
     }
 
     if (sync_info.workload_exit_percpu[cpu_idx]==0x1) {
-        #ifndef NO_PRINT
+#ifndef NO_PRINT
         if (r < 10) {
             fprintf(stderr,"%s: cpu %ld has exited\n", __func__, cpu_idx);
         }
-        #endif
+#endif
         goto failed;
     }
 
     // all cpu check, do not wait for before workload
     for (int i = 0; i<sync_info.cpus; i++) {
         if (sync_info.workload_loaded_percpu[i]!=0x1) {
-            #ifndef NO_PRINT
+#ifndef NO_PRINT
             if (r < 10) {
                 fprintf(stderr,"%s: cpu %ld: other core has not executed before_workload\n", __func__, cpu_idx);
             }
-            #endif
+#endif
             goto failed;
         }
     }
 
+    if (early_exit) {
+        CPUState *cs = qemu_get_cpu(cpu_idx);
+        cs->halted = 1;
+        cs->exception_index = EXCP_HLT;
+    }
+
+    int wait_cpus = 0;     // executed enough instructions or halt
+    int online_cpus = 0;  // not exited
+    int halt_cpus = 0;   //  not exited but halt
+
+    for (int i = 0; i<sync_info.cpus; i++) {
+        // idx i hart less than limit instructions and workload not exit, this hart could wait
+        if (sync_info.workload_exit_percpu[i] != 0x1) {
+            online_cpus += 1;
+        }
+        CPUState *cs = qemu_get_cpu(i);
+        bool halt = cs->halted == 1;
+        bool this_cpu_exit_sync_period =
+            i == cpu_idx ? early_exit : sync_info.early_exit[i];
+        if (sync_info.workload_exit_percpu[i] != 0x1 && halt) {
+            halt_cpus += 1;
+        }
+        if (this_cpu_exit_sync_period || halt || workload_insns(i) >= sync_limit_instructions()) {
+            if (sync_info.workload_exit_percpu[i] != 0x1) {
+                wait_cpus += 1;
+            }
+        }
+    }
+
     // when set limit instructions, hart must goto wait
-    if (workload_exec_insns>=limit_instructions()) {
+    if (early_exit) {
+        sync_info.early_exit[cpu_idx] = true;
+    } else if (workload_exec_insns >= sync_limit_instructions()) {
         sync_info.workload_insns[cpu_idx]=workload_exec_insns;
     } else {
         #ifndef NO_PRINT
-        if (r < 10) {
-            fprintf(stderr,"%s: cpu %ld: has not reached limit insns: %lu\n", __func__, cpu_idx, workload_exec_insns);
+        if (r < 10 || (wait_cpus == 1)) {
+            CPUState *cs = qemu_get_cpu(cpu_idx);
+            CPURISCVState *env = cpu_env(cs);
+            fprintf(stderr,"%s: cpu %ld: has not reached limit insns: %lu at pc: %#lx\n", __func__, cpu_idx, workload_insns(cpu_idx), env->pc);
         }
         #endif
         goto failed;
     }
 
-    for (int i = 0; i<sync_info.cpus; i++) {
-        // idx i hart less than limit instructions and workload not exit, this hart could wait
-        if (sync_info.workload_insns[i]<limit_instructions()) {
-            if (sync_info.workload_exit_percpu[i]!=0x1) {
-                goto wait;
-            }
-        }
+    if (wait_cpus < online_cpus) {
+        goto wait;
     }
+
+    *should_take_cpt = workload_exec_insns >= cpt_limit_instructions();
 
     g_mutex_unlock(&sync_lock);
     // all hart get sync node
@@ -150,18 +194,12 @@ static bool could_take_checkpoint(uint64_t workload_exec_insns,uint64_t cpu_idx)
 
 wait:
 #ifndef NO_PRINT
-    fprintf(stderr,"cpu %ld get wait with insns: %lu\n", cpu_idx, sync_info.workload_insns[cpu_idx]);
+    fprintf(stderr, "cpu %ld get wait with insns: %lu, sync point: %lu, early exit this period: %i, online: %i, wait cpus: %i, halt cpus: %i\n",
+            cpu_idx, workload_insns(cpu_idx),
+            sync_limit_instructions(), sync_info.early_exit[cpu_idx], online_cpus, wait_cpus, halt_cpus);
 #endif
 
-    uint64_t wait_cpus = 0;
-    for (int i = 0; i<sync_info.cpus; i++) {
-        // idx i hart less than limit instructions and workload not exit, this hart could wait
-        if (sync_info.workload_insns[i]>limit_instructions()) {
-            if (sync_info.workload_exit_percpu[i]!=0x1) {
-                wait_cpus += 1;
-            }
-        }
-    }
+    
     if (wait_cpus == 1) {
         cpu_disable_ticks();
         set_global_mtime();
@@ -172,9 +210,9 @@ wait:
         g_cond_wait(&sync_signal, &sync_lock);
     }
 
-    // fprintf(stderr,"cpu: %ld get the sync end, limit instructions: %ld\n",cpu_idx,workload_exec_insns);
 #ifndef NO_PRINT
-    fprintf(stderr,"cpu: %ld get the sync end\n",cpu_idx);
+    fprintf(stderr, "cpu: %ld get the sync end, core0: %lu, core1: %lu\n",
+            cpu_idx, workload_insns(0), workload_insns(1));
 #endif
 
     //reset status
@@ -245,19 +283,23 @@ static bool all_cpu_exit(uint64_t cpu_idx){
     }
 }
 
-bool multi_core_try_take_cpt(uint64_t icount, uint64_t cpu_idx) {
+bool multi_core_try_take_cpt(uint64_t icount, uint64_t cpu_idx, bool exit_sync_period) {
     if (checkpoint.checkpoint_mode==NoCheckpoint) {
         return false;
     }
 
-    if (could_take_checkpoint(workload_insns(cpu_idx), cpu_idx)) {
+    bool should_take_cpt = false;
+    if (sync_and_check_take_checkpoint(workload_insns(cpu_idx), cpu_idx,
+                                       &should_take_cpt, exit_sync_period)) {
         #ifndef NO_PRINT
-        fprintf(stderr,"%s: cpu %ld could take cpt, is trying to obtain lock\n", __func__, cpu_idx);
+        fprintf(stderr,"%s: cpu %ld finished sync lastly, exit period: %i\n", __func__, cpu_idx, exit_sync_period);
         #endif
         g_mutex_lock(&sync_lock);
 
         //start checkpoint
-        serialize(0x80300000, cpu_idx, sync_info.cpus, workload_insns(cpu_idx));
+        if (should_take_cpt) {
+            serialize(0x80300000, cpu_idx, sync_info.cpus, workload_insns(cpu_idx));
+        }
 
         // checkpoint end, set all flags
         for (int i = 0; i < sync_info.cpus; i++) {
@@ -265,16 +307,23 @@ bool multi_core_try_take_cpt(uint64_t icount, uint64_t cpu_idx) {
         }
 
         #ifndef NO_PRINT
-        fprintf(stderr,"cpu: %ld get the broadcast, limit instructions: %ld\n",cpu_idx,limit_instructions());
+        fprintf(stderr, "cpu: %ld get the broadcast, core0: %lu, core1: %lu\n",
+                cpu_idx, workload_insns(0), workload_insns(1));
         #endif
         for (int i = 0; i<sync_info.cpus; i++) {
             #ifndef NO_PRINT
-            fprintf(stderr,"cpu %d, insns %ld\n",i,sync_info.workload_insns[i]);
+            fprintf(stderr,"cpu %d, insns %ld\n", i, workload_insns(i));
             #endif
         }
 
         if (checkpoint.checkpoint_mode==UniformCheckpointing) {
-            update_uniform_limit_inst();
+            update_uniform_limit_inst(should_take_cpt);
+
+            for (int i = 0; i < sync_info.cpus; i++) {
+                CPUState *cs=qemu_get_cpu(i);
+                CPURISCVState *env = cpu_env(cs);
+                env->last_seen_insns=env->profiling_insns;
+            }
         }
 
         // reset self flag
@@ -303,10 +352,10 @@ void try_set_mie(void *env){
     }
 }
 
-bool try_take_cpt(uint64_t inst_count, uint64_t cpu_idx){
+bool try_take_cpt(uint64_t inst_count, uint64_t cpu_idx, bool exit_sync_period){
     if (try_take_single_core_checkpoint) {
         return single_core_try_take_cpt(inst_count);
     }else {
-        return multi_core_try_take_cpt(inst_count, cpu_idx);
+        return multi_core_try_take_cpt(inst_count, cpu_idx, exit_sync_period);
     }
 }

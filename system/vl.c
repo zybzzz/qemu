@@ -136,6 +136,7 @@
 #include "qemu/keyval.h"
 
 #include "checkpoint/checkpoint.h"
+extern sync_info_t sync_info;
 
 #define MAX_VIRTIO_CONSOLES 1
 
@@ -2765,6 +2766,10 @@ static void init_serializer(void){
     FILE * simpoints_file = NULL;
     FILE * weights_file = NULL;
 
+    if (checkpoint.checkpoint_mode != NoCheckpoint) {
+        sync_info.next_sync_point = 1*1000*1000;
+    }
+
     if  (checkpoint.checkpoint_mode == SimpointCheckpointing) {
         assert(checkpoint.cpt_interval);
         info_report("Taking simpoint checkpionts with profiling interval %lu",
@@ -3822,6 +3827,11 @@ void qemu_init(int argc, char **argv)
             case QEMU_OPTION_cpt_interval:
                 {
                     checkpoint.cpt_interval = atoi(optarg);
+                    break;
+                }
+            case QEMU_OPTION_sync_interval:
+                {
+                    sync_info.sync_interval = atoi(optarg);
                     break;
                 }
             case QEMU_OPTION_output_base_dir:

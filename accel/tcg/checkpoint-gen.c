@@ -37,5 +37,5 @@ void checkpoint_gen_empty_callback(void){
 void helper_checkpoint_sync_check(uint32_t cpu_index, void *udata) {
     CPUState *cs = qemu_get_cpu(cpu_index);
     CPURISCVState *env = cpu_env(cs);
-    try_take_cpt(env->profiling_insns, cpu_index);
+    try_take_cpt(env->profiling_insns, cpu_index, false);
 }
