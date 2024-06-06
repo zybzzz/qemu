@@ -1,4 +1,5 @@
 #include "checkpoint/checkpoint.h"
+#include "checkpoint/directed_tbs.h"
 #include "cpu_bits.h"
 #include "exec/cpu-common.h"
 #include "hw/core/cpu.h"
@@ -21,9 +22,19 @@
 #include "checkpoint/serializer_utils.h"
 #include "sysemu/cpu-timers.h"
 #include "sysemu/runstate.h"
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <unistd.h>
 
 GMutex sync_lock;
+sync_info_t sync_info;
+SyncControlInfo sync_control_info;
+Qemu2Detail q2d_buf;
 GCond sync_signal;
+
+int d2q_fifo;
+int q2d_fifo;
 
 #define NO_PRINT
 
@@ -56,6 +67,15 @@ void multicore_checkpoint_init(MachineState *machine)
     ns->sync_info.workload_insns = g_malloc0(cpus * sizeof(uint64_t));
     ns->sync_info.early_exit = g_malloc0(cpus * sizeof(bool));
     ns->sync_info.checkpoint_end = g_malloc0(cpus * sizeof(bool));
+
+    const char *detail_to_qemu_fifo_name = "./detail_to_qemu.fifo";
+    d2q_fifo = open(detail_to_qemu_fifo_name, O_RDONLY);
+
+    const char *qemu_to_detail_fifo_name = "./qemu_to_detail.fifo";
+    q2d_fifo = open(qemu_to_detail_fifo_name, O_WRONLY);
+
+    sync_control_info.info_vaild_periods = 1;
+
     g_mutex_unlock(&sync_lock);
 }
 
@@ -77,12 +97,51 @@ static inline uint64_t cpt_limit_instructions(NEMUState *ns)
     }
 }
 
-static inline uint64_t sync_limit_instructions(NEMUState *ns)
+static inline uint64_t sync_limit_instructions(NEMUState *ns, uint64_t cpu_idx)
 {
     if (ns->checkpoint_info.checkpoint_mode == UniformCheckpointing) {
-        return ns->sync_info.sync_interval;
+//        return ns->sync_info.sync_interval;
+        return (uint64_t)((double)ns->sync_info.sync_interval /
+                      sync_control_info.u_arch_info.CPI[cpu_idx]);
+
     }else {
         return cpt_limit_instructions(ns);
+    }
+}
+
+static void update_uniform_limit_inst(NEMUState* ns, bool taken_cpt)
+{
+    if (taken_cpt) {
+        ns->checkpoint.next_uniform_point += ns->checkpoint.cpt_interval;
+        q2d_buf.cpt_ready = true;
+        // q2d_buf.cpt_id = 0;
+        // q2d_buf.total_inst_count = checkpoint.next_uniform_point;
+
+        write(q2d_fifo, &q2d_buf, sizeof(Qemu2Detail));
+    }
+
+    sync_info.next_sync_point += sync_info.sync_interval;
+    memset(sync_info.early_exit, 0, sync_info.cpus * sizeof(bool));
+
+    sync_control_info.info_vaild_periods -= 1;
+    if (sync_control_info.info_vaild_periods <= 0) {
+        // For test, TODO remove it in real sim
+        write(q2d_fifo, &q2d_buf, sizeof(Qemu2Detail));
+#ifndef NO_PRINT
+        fprintf(stderr, "Obtaining new sync control info\n");
+#endif
+        read(d2q_fifo, &sync_control_info.u_arch_info,
+             sizeof(Detail2Qemu));
+        // For test, TODO remove it in real sim
+        sync_control_info.info_vaild_periods = 3;
+        // For real
+        // sync_control_info.info_vaild_periods = checkpoint.cpt_interval /
+        //                                       sync_info.sync_interval;
+#ifndef NO_PRINT
+        fprintf(stderr,
+                "Obtained new sync control info, valid thru %i periods\n",
+                sync_control_info.info_vaild_periods);
+#endif
     }
 }
 
@@ -152,7 +211,7 @@ static bool sync_and_check_take_checkpoint(NEMUState *ns,
 
     int wait_cpus = 0; // executed enough instructions or halt
     int online_cpus = 0; // not exited
-    int halt_cpus = 0; //  not exited but halt
+    __attribute_maybe_unused__ int halt_cpus = 0; //  not exited but halt
 
     for (int i = 0; i < ns->sync_info.cpus; i++) {
         // idx i hart more than limit instructions and workload not exit, this
@@ -170,7 +229,7 @@ static bool sync_and_check_take_checkpoint(NEMUState *ns,
         }
 
         // halt or workload insns >= sync limit -> goto wait
-        if (halt || workload_insns(i) >= sync_limit_instructions(ns)) {
+        if (halt || workload_insns(i) >= sync_limit_instructions(ns, i)) {
             if (ns->sync_info.workload_exit_percpu[i] != 0x1) {
                 wait_cpus += 1;
             }
@@ -181,7 +240,7 @@ static bool sync_and_check_take_checkpoint(NEMUState *ns,
     if (early_exit) {
         ns->sync_info.early_exit[cpu_idx] = true;
     // if not get early wait but get limit instructions, could go on
-    } else if (workload_exec_insns >= sync_limit_instructions(ns)) {
+    } else if (workload_exec_insns >= sync_limit_instructions(ns, cpu_idx)) {
         ns->sync_info.workload_insns[cpu_idx] = workload_exec_insns;
     // else must goto failed
     } else {
@@ -220,7 +279,7 @@ wait:
     fprintf(stderr,
             "cpu %ld get wait with insns: %lu, sync point: %lu, early exit "
             "this period: %i, online: %i, wait cpus: %i, halt cpus: %i\n",
-            cpu_idx, workload_insns(cpu_idx), sync_limit_instructions(ns),
+            cpu_idx, workload_insns(cpu_idx), sync_limit_instructions(ns, cpu_idx),
             ns->sync_info.early_exit[cpu_idx], online_cpus, wait_cpus, halt_cpus);
 //#endif
 
