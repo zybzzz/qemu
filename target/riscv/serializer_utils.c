@@ -6,6 +6,7 @@
 #include "checkpoint/checkpoint.pb.h"
 #include "checkpoint/pb_encode.h"
 #include <assert.h>
+#include <stdint.h>
 #include <zstd.h>
 
 #define USE_ZSTD_COMPRESS
@@ -105,12 +106,14 @@ exit:
 
 
 __attribute_maybe_unused__ void serializeRegs(int cpu_index, char *buffer, single_core_rvgc_rvv_rvh_memlayout *cpt_percpu_layout, uint64_t all_cpu_num, uint64_t arg_mtime)  {
+    // init vars
     CPUState *cs = qemu_get_cpu(cpu_index);
     RISCVCPU *cpu = RISCV_CPU(&cs->parent_obj);
     CPURISCVState *env = cpu_env(cs);
     uint64_t buffer_offset=0;
     assert(cpt_percpu_layout);
 
+    // store int regs
     buffer_offset = cpt_percpu_layout->int_reg_cpt_addr;
     for(int i = 0 ; i < 32; i++) {
         memcpy(buffer + buffer_offset + i * 8, &env->gpr[i], 8);
@@ -121,14 +124,14 @@ __attribute_maybe_unused__ void serializeRegs(int cpu_index, char *buffer, singl
     }
     info_report("Writting int registers to checkpoint memory");
 
-//    F extertion
+    // store fp regs
     buffer_offset = cpt_percpu_layout->float_reg_cpt_addr;
     for (int i = 0; i < 32; i++) {
         memcpy(buffer + buffer_offset + i * 8, &env->fpr[i], 8);
     }
     info_report("Writting float registers to checkpoint memory");
-//    V extertion
-//    if(env->virt_enabled) {
+
+    // store vector regs
     buffer_offset = cpt_percpu_layout->vector_reg_cpt_addr;
     for (int i = 0; i < 32 * cpu->cfg.vlen / 64; i++) {
         memcpy(buffer + buffer_offset + i * 8, &env->vreg[i], 8);
@@ -140,9 +143,8 @@ __attribute_maybe_unused__ void serializeRegs(int cpu_index, char *buffer, singl
     }
     info_report("Writting 32 * %d vector registers to checkpoint memory\n",
             cpu->cfg.vlen / 64);
-//    }
 
-//    CSR registers
+    // store csr regs
     buffer_offset = cpt_percpu_layout->csr_reg_cpt_addr;
     for (int i = 0; i < CSR_TABLE_SIZE; i++) {
         if (csr_ops[i].read != NULL) {
@@ -156,22 +158,36 @@ __attribute_maybe_unused__ void serializeRegs(int cpu_index, char *buffer, singl
     }
     info_report("Writting csr registers to checkpoint memory");
 
-//    magic number write
+    // if unuse protobuf we must set magic number at addr (0xECDB0 + (char*)buffer)
 #ifndef USING_PROTOBUF
     uint64_t flag_val = CPT_MAGIC_BUMBER;
     buffer_offset = 0xECDB0;
     memcpy(buffer + buffer_offset, &flag_val, 8);
 #endif
 
+    uint64_t priv = env->priv;
+    if (priv==PRV_M) {
+        info_report("Generate checkpoint from M mode !!!!!!!!!!!!!!!!!!!!!!!!!");
+    }
     uint64_t tmp_mstatus = env->mstatus;
-    // set mpie = mie
-    tmp_mstatus =
-        set_field(tmp_mstatus, MSTATUS_MPIE, get_field(tmp_mstatus, MSTATUS_MIE));
+    
+    // if the hart not at M mode, we should preprocess some regs
+    if (priv != PRV_M) {
+        // set mpie = mie
+        tmp_mstatus =
+            set_field(tmp_mstatus, MSTATUS_MPIE, get_field(tmp_mstatus, MSTATUS_MIE));
 
-    // clear mie
-    tmp_mstatus=set_field(tmp_mstatus, MSTATUS_MIE, 0);
-    // set v flag for h-ext checkpoint
-    tmp_mstatus=set_field(tmp_mstatus, MSTATUS_MPP, env->priv);
+        // clear mie
+        tmp_mstatus=set_field(tmp_mstatus, MSTATUS_MIE, 0);
+
+        // set priv in mpp
+        tmp_mstatus=set_field(tmp_mstatus, MSTATUS_MPP, env->priv);
+
+        // set v flag for h-ext checkpoint
+        tmp_mstatus=set_field(tmp_mstatus, MSTATUS_MPV, env->virt_enabled);
+    }
+
+    // overwrite mstatus
     buffer_offset = cpt_percpu_layout->csr_reg_cpt_addr + 0x300 * 8;
     memcpy(buffer + buffer_offset, &tmp_mstatus, 8);
     info_report("Writting mstatus registers to checkpoint memory: %lx mpp %lx",
@@ -183,11 +199,7 @@ __attribute_maybe_unused__ void serializeRegs(int cpu_index, char *buffer, singl
     info_report("Writting mideleg registers to screen: %lx", tmp_mideleg);
     uint64_t tmp_mie = env->mie;
 
-    // if (all_cpu_num == 1) {
-    //     tmp_mstatus = set_field(tmp_mstatus, MSTATUS_MPIE, 0);
-    // }
-
-    // one cpu donot need time interrupt
+    // if workload only use one cpu, that donot need enable time interrupt
     if (all_cpu_num == 1) {
         tmp_mie=set_field(tmp_mie, MIE_STIE, 0); //restore disable stie
         tmp_mie=set_field(tmp_mie, MIE_UTIE, 0); //restore disable utie
@@ -226,7 +238,11 @@ __attribute_maybe_unused__ void serializeRegs(int cpu_index, char *buffer, singl
     tmp_satp=*(uint64_t*)(buffer+buffer_offset);
     info_report("Satp from env %lx, Satp from memory %lx",env->satp, tmp_satp);
 
-    uint64_t tmp_mepc=env->pc;
+
+    uint64_t tmp_mepc = env->mepc;
+    if (priv != PRV_M) {
+        tmp_mepc = env->pc;
+    }
     buffer_offset = cpt_percpu_layout->csr_reg_cpt_addr + 0x341 * 8;
     memcpy(buffer+buffer_offset,&tmp_mepc,8);
     info_report("Writting mepc registers to checkpoint memory: %lx",tmp_mepc);
@@ -243,6 +259,7 @@ __attribute_maybe_unused__ void serializeRegs(int cpu_index, char *buffer, singl
     memcpy(buffer+buffer_offset,&tmp_mtime_cmp,8);
     info_report("Writting mtime_cmp registers to checkpoint memory: %lx %x",tmp_mtime_cmp,CLINT_MMIO+CLINT_MTIMECMP+(cpu_index*8));
 
+    // multicore will use global time
     uint64_t tmp_mtime;
     if (arg_mtime == 0) {
         cpu_physical_memory_read(CLINT_MMIO+CLINT_MTIME, &tmp_mtime, 8);
@@ -257,7 +274,7 @@ __attribute_maybe_unused__ void serializeRegs(int cpu_index, char *buffer, singl
     info_report("Writting mtime registers to checkpoint memory: %lx %x", tmp_mtime,
                 CLINT_MMIO + CLINT_MTIME);
 
-    // write all_cpus
+    // write all_cpu nums in reverse space
     buffer_offset = cpt_percpu_layout->csr_reserve;
     memcpy(buffer+buffer_offset, &all_cpu_num, 8);
     info_report("Writting all_cpus %ld to checkpoint memory: %lx", all_cpu_num, cpt_percpu_layout->csr_reserve);

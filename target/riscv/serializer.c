@@ -25,6 +25,7 @@ static uint64_t get_next_instructions(void) {
     }
 }
 
+__attribute_maybe_unused__
 static int get_env_cpu_mode(void){
     CPUState *cs = qemu_get_cpu(0);
     CPURISCVState *env = cpu_env(cs);
@@ -108,9 +109,6 @@ static bool could_take_checkpoint(uint64_t icount){
         return false;
     }
     if (!checkpoint.workload_loaded) {
-        return false;
-    }
-    if (get_env_cpu_mode()==PRV_M) {
         return false;
     }
     if (!instrsCouldTakeCpt(icount)) {
