@@ -9,10 +9,9 @@
 #include <glib.h>
 #include <unistd.h>
 #include <sys/mman.h>
-
 #include <qemu-plugin.h>
-
 #include <fcntl.h>
+
 #define FILENAME_MXLEN 256
 #define MAX_CPUS 8
 
@@ -47,7 +46,7 @@ typedef struct ProfilingInfo {
   GHashTable *bbv;
   bool start_profiling;
   uint64_t unique_trans_id;
-  uint64_t all_exec_insns;
+  uint64_t profiling_insns;
   uint64_t bbv_exec_insns;
   uint64_t exec_count_all;
 } ProfilingInfo_t;
@@ -122,6 +121,7 @@ void clean_exec_count(gpointer key, gpointer value, gpointer user_data) {
 }
 
 void try_profiling(unsigned int cpu_index, void *userdata) {
+  // hash key
   uint64_t hash = (uint64_t)userdata;
   BasicBlockExecCount_t *cnt;
 
@@ -135,7 +135,7 @@ void try_profiling(unsigned int cpu_index, void *userdata) {
   if (profiling_info.start_profiling == true) {
     // add bbv and profiling inst
     profiling_info.bbv_exec_insns += cnt->insns;
-    profiling_info.all_exec_insns += cnt->insns;
+    profiling_info.profiling_insns += cnt->insns;
 
     g_mutex_lock(&cnt->lock);
     cnt->exec_count++;
@@ -147,11 +147,10 @@ void try_profiling(unsigned int cpu_index, void *userdata) {
 
       GList *sorted_list =
           g_list_sort(g_hash_table_get_values(profiling_info.bbv), cmp_id);
-      //    GList
-      //    *sorted_list=g_list_sort(g_hash_table_get_values(userdata),cmp_exec_count);
-      //    GList *sorted_list=g_hash_table_get_values(userdata);
 
+      // output to bbv
       g_list_foreach(sorted_list, bbv_output, NULL);
+      // free sort list
       g_list_free(sorted_list);
 
       gzprintf(profiling_info.bbv_file, "\n");
@@ -220,20 +219,25 @@ instruction_check(unsigned int vcpu_index, void *userdata) {
 }
 
 static void nemu_trap_check(unsigned int vcpu_index, void *userdata) {
+  // data is inst value
   uint64_t data = (uint64_t)userdata;
   static int nemu_trap_count = 0;
+
   g_mutex_lock(&profiling_info.lock);
-  printf("Flom plugin, all exec insn %ld\n", profiling_info.exec_count_all);
+  printf("From plugin, all exec insn %ld\n", profiling_info.exec_count_all);
   if (profiling_info.start_profiling == true) {
-    printf("Hello, nemu_trap, after profiling\n");
-//    printf("all vset instructions %ld\n",vset_counter.vset_counter);
-    printf("SimPoint profiling exit, profiling all insns %ld", profiling_info.all_exec_insns);
+    // prepare exit
+    printf("PLUGIN: After profiling GET NEMU_TRAP\n");
+    printf("SimPoint profiling exit, total guest instructions = %ld", profiling_info.profiling_insns);
+    return;
   }
+  // disable timer
   nemu_trap_count += 1;
+  // start profiling
   if (nemu_trap_count == 2) {
     profiling_info.start_profiling = true;
     g_hash_table_foreach(profiling_info.bbv, clean_exec_count, NULL);
-    printf("worklaod loaded........................\n");
+    printf("PLUGIN: worklaod loaded........................\n");
   }
   g_mutex_unlock(&profiling_info.lock);
   return;
@@ -247,32 +251,37 @@ static void prepare_bbl(qemu_plugin_id_t id, struct qemu_plugin_tb *tb) {
   uint64_t end_pc = qemu_plugin_insn_vaddr(tb_end_insn);
   BasicBlockExecCount_t *cnt;
 
-  // prepare hash key
   char index_buf[128] = {0};
+  // create hash key
   sprintf(index_buf, "%ld%ld", pc, insns);
   uint64_t hash_key = atol(index_buf);
 
+  // register callback when translation inst is nemu_trap
   for (size_t i = 0; i < insns; i++) {
     struct qemu_plugin_insn *insn = qemu_plugin_tb_get_insn(tb, i);
     uint32_t *data = qemu_plugin_insn_data(insn);
     if (*data == 0x6b) {
       qemu_plugin_register_vcpu_insn_exec_cb(insn, nemu_trap_check,
                                              QEMU_PLUGIN_CB_NO_REGS, *data);
-    } // else
-      // if((((*data)&0x80007057)==0x80007057||((*data)&0xc0007057)==0xc0007057||((*data)&0x7057)==0x7057)){
-      //   qemu_plugin_register_vcpu_insn_exec_cb(insn,instruction_check,QEMU_PLUGIN_CB_NO_REGS,*data);
-      //}
+    } 
+    // else
+    // if((((*data)&0x80007057)==0x80007057||((*data)&0xc0007057)==0xc0007057||((*data)&0x7057)==0x7057)){
+    //   qemu_plugin_register_vcpu_insn_exec_cb(insn,instruction_check,QEMU_PLUGIN_CB_NO_REGS,*data);
+    //}
   }
 
   g_mutex_lock(&profiling_info.lock);
+  // find exists bbv_info
   cnt = (BasicBlockExecCount_t *)g_hash_table_lookup(profiling_info.bbv,
                                                      (gconstpointer)hash_key);
 
   if (cnt) {
+    // if exists add trans_count
     g_mutex_lock(&cnt->lock);
     cnt->trans_count++;
     g_mutex_unlock(&cnt->lock);
   } else {
+    // else create new bbv info
     cnt = g_new0(BasicBlockExecCount_t, 1);
     g_mutex_lock(&cnt->lock);
     cnt->start_addr = pc;
@@ -294,7 +303,9 @@ static void prepare_bbl(qemu_plugin_id_t id, struct qemu_plugin_tb *tb) {
 //
 static void profiling_exit(qemu_plugin_id_t id, void *userdata) {
   g_mutex_lock(&profiling_info.lock);
+  // close bbv file
   gzclose(profiling_info.bbv_file);
+  // remove hashtable
   g_hash_table_destroy(profiling_info.bbv);
   // g_hash_table_foreach_remove(profiling_info.bbv,hash_table_remove,NULL);
   g_mutex_unlock(&profiling_info.lock);
@@ -320,18 +331,6 @@ static void profiling_exit(qemu_plugin_id_t id, void *userdata) {
   //  exit",profiling_info.all_exec_insns);
   //  g_mutex_unlock(&profiling_info.lock);
 }
-
-//static void at_exit() {
-//  g_mutex_lock(&profiling_info.lock);
-//  gzclose(profiling_info.bbv_file);
-//  g_hash_table_destroy(profiling_info.bbv);
-//  printf("simpoint profiling exit all insns %ld",
-//         profiling_info.all_exec_insns);
-//  // g_hash_table_foreach_remove(profiling_info.bbv,hash_table_remove,NULL);
-//  g_mutex_unlock(&profiling_info.lock);
-//
-//  gzclose(vset_counter.log_file);
-//}
 
 QEMU_PLUGIN_EXPORT int qemu_plugin_install(qemu_plugin_id_t id,
                                            const qemu_info_t *info, int argc,
@@ -379,7 +378,7 @@ QEMU_PLUGIN_EXPORT int qemu_plugin_install(qemu_plugin_id_t id,
 
   profiling_info.start_profiling = false;
   profiling_info.unique_trans_id = 0;
-  profiling_info.all_exec_insns = 0;
+  profiling_info.profiling_insns = 0;
   profiling_info.exec_count_all = 0;
   profiling_info.bbv_exec_insns = 0;
 
@@ -393,7 +392,7 @@ QEMU_PLUGIN_EXPORT int qemu_plugin_install(qemu_plugin_id_t id,
 
   g_mutex_unlock(&profiling_info.lock);
 
-  // create profiling result file(simpoint bbv)
+  // create simpoint_bbv.gz
   profiling_init(profiling_info.args.target_path,
                  profiling_info.args.worklaod_path);
 
