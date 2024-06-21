@@ -33,13 +33,13 @@ void serialize_pmem(uint64_t inst_count, int using_gcpt_mmio, char* hardware_sta
     char filepath[FILEPATH_BUF_SIZE];
 
     //prepare path
-    if (checkpoint.checkpoint_mode == SimpointCheckpointing) {
-        strcpy(filepath,((GString*)(g_list_first(path_manager.checkpoint_path_list)->data))->str);
-    }else if(checkpoint.checkpoint_mode==UniformCheckpointing){
-        sprintf(filepath, "%s/%ld/_%ld_.gz", path_manager.uniform_path->str, inst_count, inst_count);
+    if (ns->checkpoint_info.checkpoint_mode == SimpointCheckpointing) {
+        strcpy(filepath,((GString*)(g_list_first(ns->path_manager.checkpoint_path_list)->data))->str);
+    }else if(ns->checkpoint_info.checkpoint_mode==UniformCheckpointing){
+        sprintf(filepath, "%s/%ld/_%ld_.gz", ns->path_manager.uniform_path->str, inst_count, inst_count);
     }
 
-    printf("prepare for generate checkpoint path %s pmem_size %ld\n",filepath,guest_pmem_size);
+    info_report("prepare for generate checkpoint path %s pmem_size %ld\n",filepath,guest_pmem_size);
     assert(g_mkdir_with_parents(g_path_get_dirname(filepath), 0775)==0);
 
 #ifdef USE_ZSTD_COMPRESS
@@ -117,7 +117,7 @@ __attribute_maybe_unused__ void serializeRegs(int cpu_index, char *buffer, singl
     buffer_offset = cpt_percpu_layout->int_reg_cpt_addr;
     for(int i = 0 ; i < 32; i++) {
         memcpy(buffer + buffer_offset + i * 8, &env->gpr[i], 8);
-        printf("gpr %04d value %016lx ", i, env->gpr[i]);
+        info_report("gpr %04d value %016lx ", i, env->gpr[i]);
         if ((i + 1) % 4 == 0) {
             printf("\n");
         }

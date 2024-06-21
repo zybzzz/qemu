@@ -27,10 +27,9 @@
 #include "sysemu/runstate.h"
 #include "checkpoint/checkpoint.h"
 
-
-extern sync_info_t sync_info;
 extern GMutex sync_lock;
-void helper_nemu_trap(CPURISCVState *env,target_ulong a0){
+void helper_nemu_trap(CPURISCVState *env, target_ulong a0) {
+
 #define DISABLE_TIME_INTR 0x100
 #define NOTIFY_PROFILER 0x101
 #define NOTIFY_PROFILE_EXIT 0x102
@@ -38,31 +37,37 @@ void helper_nemu_trap(CPURISCVState *env,target_ulong a0){
 #define GOOD_TRAP 0x0
 
     CPUState *cs = env_cpu(env);
+    MachineState *ms = MACHINE(qdev_get_machine());
+    NEMUState *ns = NEMU_MACHINE(ms);
+
     fflush(stdout);
 
     g_mutex_lock(&sync_lock);
-    if (a0==DISABLE_TIME_INTR) {
+    if (a0 == DISABLE_TIME_INTR) {
         try_set_mie(env);
     } else if (a0 == NOTIFY_PROFILER) {
         // workload loaded
         env->last_seen_insns = env->profiling_insns;
         // multi core checkpoint
-        sync_info.workload_loaded_percpu[cs->cpu_index] = 0x1;
+        ns->sync_info.workload_loaded_percpu[cs->cpu_index] = 0x1;
         // single core
-        checkpoint.workload_loaded = true;
-        printf("cpu index %d nemu_trap get insns %ld\n", cs->cpu_index,
-               env->profiling_insns);
+        ns->checkpoint_info.workload_loaded = true;
+        printf("Notify cpu index %d nemu_trap get insns %ld get workload start profiling\n", cs->cpu_index,
+        env->profiling_insns);
     } else if (a0 == NOTIFY_WORKLOAD_EXIT) {
         // sig multi core exit
-        sync_info.workload_exit_percpu[cs->cpu_index]=0x1;
+        ns->sync_info.workload_exit_percpu[cs->cpu_index] = 0x1;
         //
-        checkpoint.workload_exit=true;
-        printf("Notify cpu index %d nemu_trap get insns %ld get worklaod exit\n",cs->cpu_index,env->profiling_insns);
+        ns->checkpoint_info.workload_exit = true;
+        printf("Notify cpu index %d nemu_trap get insns %ld get worklaod exit\n",
+        cs->cpu_index, env->profiling_insns);
     } else if (a0 == NOTIFY_PROFILE_EXIT) {
         // sig profiling exit
-        printf("cpu index %d nemu_trap get insns %ld\n",cs->cpu_index,env->profiling_insns);
-    } else {
+        printf("cpu index %d nemu_trap get insns %ld\n", cs->cpu_index,
+        env->profiling_insns);
+    } else if(a0 == GOOD_TRAP){
         // exit
+        printf("Hit GOOD TRAP\n");
         qemu_system_shutdown_request(SHUTDOWN_CAUSE_HOST_QMP_QUIT);
     }
     g_mutex_unlock(&sync_lock);

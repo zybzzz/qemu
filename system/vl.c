@@ -135,8 +135,6 @@
 #include "qemu/guest-random.h"
 #include "qemu/keyval.h"
 
-#include "checkpoint/checkpoint.h"
-extern sync_info_t sync_info;
 
 #define MAX_VIRTIO_CONSOLES 1
 
@@ -196,18 +194,6 @@ static int default_cdrom = 1;
 static int default_sdcard = 1;
 static int default_vga = 1;
 static int default_net = 1;
-
-
-/* -------------------------------------------------- arg for checkpoint -----------------------------------*/
-static const char * simpoints_path = NULL;
-static const char * output_base_dir = NULL;
-static const char * config_name = NULL;
-static const char * workload_name = NULL;
-
-SimpointInfo simpoint_info;
-PathManager path_manager;
-Checkpoint checkpoint;
-/* ------------------------------------------------------ end --------------------------------------------*/
 
 static const struct {
     const char *driver;
@@ -2762,151 +2748,6 @@ void qmp_x_exit_preconfig(Error **errp)
     }
 }
 
-static void init_serializer(void){
-    FILE * simpoints_file = NULL;
-    FILE * weights_file = NULL;
-
-    if (checkpoint.checkpoint_mode != NoCheckpoint) {
-        sync_info.next_sync_point = 1*1000*1000;
-    }
-
-    if  (checkpoint.checkpoint_mode == SimpointCheckpointing) {
-        assert(checkpoint.cpt_interval);
-        info_report("Taking simpoint checkpionts with profiling interval %lu",
-            checkpoint.cpt_interval);
-
-        GString *simpoints_path=g_string_new(NULL);
-        GString *weights_path=g_string_new(NULL);
-        g_string_printf(simpoints_path,"%s/%s",path_manager.simpoint_path->str,"simpoints0");
-        g_string_printf(weights_path,"%s/%s",path_manager.simpoint_path->str,"weights0");
-
-        simpoints_file = fopen(simpoints_path->str, "r");
-        weights_file = fopen(weights_path->str, "r");
-
-        assert(simpoints_file);
-        assert(weights_file);
-
-        uint64_t simpoint_location, simpoint_id, weight_id;
-        char weight[128];
-
-        while (fscanf(simpoints_file, "%lu %lu\n", &simpoint_location, &simpoint_id) != EOF && fscanf(weights_file, "%s %lu\n", weight, &weight_id)!=EOF)
-        {
-
-//            assert();
-            assert(weight_id == simpoint_id);
-            GString *weight_str=g_string_new(weight);
-
-            simpoint_info.cpt_instructions=g_list_append(simpoint_info.cpt_instructions,GINT_TO_POINTER (simpoint_location));
-            simpoint_info.weights=g_list_append(simpoint_info.weights,weight_str);
-
-            info_report("Simpoint %lu: @ %lu, weight: %s", simpoint_id, simpoint_location, weight);
-        }
-
-        fclose(simpoints_file);
-        fclose(weights_file);
-
-
-    } else if (checkpoint.checkpoint_mode==UniformCheckpointing) {
-        info_report("Taking uniform checkpionts with interval %lu", checkpoint.cpt_interval);
-        checkpoint.next_uniform_point = checkpoint.cpt_interval;
-    } else{
-        error_report("Checkpoint mode just support SimpointCheckpoint and UniformCheckpoint");
-        exit(1);
-    }
-
-    checkpoint.workload_loaded=false;
-}
-
-static gint g_compare_path(gconstpointer a,gconstpointer b){
-    char tmp_str[512];
-    int data_a;
-    int data_b;
-    sscanf(((GString*)a)->str,"%s %d %s",tmp_str,&data_a,tmp_str);
-    sscanf(((GString*)b)->str,"%s %d %s",tmp_str,&data_b,tmp_str);
-    if (data_a==data_b) {
-        return 0;
-    }else if(data_a<data_b){
-        return -1;
-    }else{
-        return 1;
-    }
-}
-static gint g_compare_instrs(gconstpointer a,gconstpointer b){
-    if (GPOINTER_TO_INT(a)==GPOINTER_TO_INT(b)) {
-        return 0;
-    }else if(GPOINTER_TO_INT(a)<GPOINTER_TO_INT(b)){
-        return -1;
-    }else{
-        return 1;
-    }
-}
-
-static void check_path(gpointer data, gpointer user_data){
-    info_report("%s",((GString*)data)->str);
-}
-
-static void check_instrs(gpointer data, gpointer user_data){
-    info_report("%d",GPOINTER_TO_INT(data));
-}
-
-static void replace_space(gpointer data, gpointer user_data){
-    char str_before[512];
-    char str_after[512];
-    int instrs;
-    sscanf(((GString*)data)->str,"%s %d %s",str_before,&instrs,str_after);
-    g_string_printf(data,"%s%d%s",str_before,instrs,str_after);
-}
-
-static void prepare_output_path(gpointer cpt_instructions_item, gpointer base_output_path){
-    GString* checkpoint_path=g_string_new(NULL);
-    gint data_position=g_list_index(simpoint_info.cpt_instructions,cpt_instructions_item);
-    // base_path/cpt_instruction_limit/_CptInstructionLimit_weights.gz
-    g_string_printf(checkpoint_path, "%s/%d/_ %d _%s.gz",(char*)base_output_path,GPOINTER_TO_INT(cpt_instructions_item),GPOINTER_TO_INT(cpt_instructions_item),((GString*)(g_list_nth(simpoint_info.weights,data_position)->data))->str);
-
-    path_manager.checkpoint_path_list=g_list_append(path_manager.checkpoint_path_list,checkpoint_path);
-}
-
-static void init_path_manager(void){
-
-    char base_output_path[1024];
-    assert(workload_name);
-    path_manager.workload_name=g_string_new(workload_name);
-    assert(output_base_dir);
-    path_manager.base_dir=g_string_new(output_base_dir);
-    assert(config_name);
-    path_manager.config_name=g_string_new(config_name);
-    sprintf(base_output_path,"%s/%s/%s",output_base_dir,config_name,workload_name);
-
-    info_report("base output path %s",base_output_path);
-
-    //prepare simpoint path for init serializer
-    if (checkpoint.checkpoint_mode == SimpointCheckpointing) {
-        assert(simpoints_path);
-        path_manager.simpoint_path=g_string_new(simpoints_path);
-        g_string_printf(path_manager.simpoint_path, "%s/%s",simpoints_path,path_manager.workload_name->str);
-    }
-
-    // Simpoint need prepare_simpoint_path
-    // Uniform need prepare interval
-    init_serializer();
-
-    if (checkpoint.checkpoint_mode == SimpointCheckpointing) {
-        g_list_foreach(simpoint_info.cpt_instructions, prepare_output_path, base_output_path);
-
-        path_manager.checkpoint_path_list=g_list_sort(path_manager.checkpoint_path_list,g_compare_path);
-        simpoint_info.cpt_instructions=g_list_sort(simpoint_info.cpt_instructions,g_compare_instrs);
-
-        g_list_foreach(path_manager.checkpoint_path_list,replace_space,NULL);
-
-        g_list_foreach(path_manager.checkpoint_path_list,check_path,NULL);
-        g_list_foreach(simpoint_info.cpt_instructions,check_instrs,NULL);
-    }else if(checkpoint.checkpoint_mode == UniformCheckpointing){
-        path_manager.uniform_path=g_string_new(base_output_path);
-        g_string_printf(path_manager.uniform_path, "%s/%s",base_output_path,path_manager.workload_name->str);
-        info_report("prepare for checkpoint %s\n",path_manager.uniform_path->str);
-    }
-}
-
 void qemu_init(int argc, char **argv)
 {
     QemuOpts *opts;
@@ -3800,72 +3641,11 @@ void qemu_init(int argc, char **argv)
             }
 #endif /* CONFIG_POSIX */
 
-            case QEMU_OPTION_checkpoint_mode:
-                {
-                    if (strcmp(optarg,"NoCheckpoint")==0) {
-                        checkpoint.checkpoint_mode=NoCheckpoint;
-                    }else if(strcmp(optarg,"SimpointCheckpoint")==0){
-                        checkpoint.checkpoint_mode=SimpointCheckpointing;
-                    }else if(strcmp(optarg,"UniformCheckpoint")==0){
-                        checkpoint.checkpoint_mode=UniformCheckpointing;
-                    }else{
-                        checkpoint.checkpoint_mode=NoCheckpoint;
-                    }
-                    break;
-                }
-            case QEMU_OPTION_simpoint_path:
-                {
-                    simpoints_path = optarg;
-                    break;
-                }
-            case QEMU_OPTION_workload_name:
-                {
-                    workload_name = optarg;
-                    break;
-                }
-            case QEMU_OPTION_cpt_interval:
-                {
-                    checkpoint.cpt_interval = atoi(optarg);
-                    break;
-                }
-            case QEMU_OPTION_sync_interval:
-                {
-                    sync_info.sync_interval = atoi(optarg);
-                    break;
-                }
-            case QEMU_OPTION_output_base_dir:
-                {
-                    output_base_dir = optarg;
-                    break;
-                }
-            case QEMU_OPTION_config_name:
-                {
-                    config_name = optarg;
-                    break;
-                }
-            case QEMU_OPTION_boot_checkpoint:
-                {
-                    qdict_put_str(machine_opts_dict, "checkpoint", optarg);
-                    break;
-                }
-            case QEMU_OPTION_boot_gcpt_restore:
-                {
-                    qdict_put_str(machine_opts_dict, "gcpt_restore", optarg);
-                    break;
-                }
             default:
                 error_report("Option not supported in this build");
                 exit(1);
             }
         }
-    }
-
-
-    /*
-     * simpoint file init
-     */
-    if (checkpoint.checkpoint_mode!=NoCheckpoint) {
-        init_path_manager();
     }
 
     /*
@@ -3991,5 +3771,5 @@ void qemu_init(int argc, char **argv)
     accel_setup_post(current_machine);
     os_setup_post();
     resume_mux_open();
-    multicore_checkpoint_init();
+
 }
