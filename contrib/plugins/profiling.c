@@ -34,6 +34,7 @@ typedef struct BasicBlockExecCount {
 } BasicBlockExecCount_t;
 
 typedef struct QemuInfo {
+  const char * target_name;
   uint64_t smp_vcpus;
   uint64_t max_vcpus;
   bool system_emulation;
@@ -121,6 +122,9 @@ void clean_exec_count(gpointer key, gpointer value, gpointer user_data) {
 }
 
 void try_profiling(unsigned int cpu_index, void *userdata) {
+  if (cpu_index != 0) {
+    return;
+  }
   // hash key
   uint64_t hash = (uint64_t)userdata;
   BasicBlockExecCount_t *cnt;
@@ -220,6 +224,13 @@ instruction_check(unsigned int vcpu_index, void *userdata) {
 
 static void nemu_trap_check(unsigned int vcpu_index, void *userdata) {
   // data is inst value
+  static int profiling_exit = 0;
+  if (profiling_exit == 1) {
+    return;
+  }
+  if (vcpu_index!=0) {
+    return;
+  }
   uint64_t data = (uint64_t)userdata;
   static int nemu_trap_count = 0;
 
@@ -228,7 +239,9 @@ static void nemu_trap_check(unsigned int vcpu_index, void *userdata) {
   if (profiling_info.start_profiling == true) {
     // prepare exit
     printf("PLUGIN: After profiling GET NEMU_TRAP\n");
-    printf("SimPoint profiling exit, total guest instructions = %ld", profiling_info.profiling_insns);
+    printf("SimPoint profiling exit, total guest instructions = %ld\n", profiling_info.profiling_insns);
+    profiling_exit = 1;
+    g_mutex_unlock(&profiling_info.lock);
     return;
   }
   // disable timer
@@ -336,17 +349,13 @@ QEMU_PLUGIN_EXPORT int qemu_plugin_install(qemu_plugin_id_t id,
                                            const qemu_info_t *info, int argc,
                                            char **argv) {
   // init qemu info
+  qemu_info.target_name = info->target_name;
   qemu_info.max_vcpus = info->system.max_vcpus;
   qemu_info.smp_vcpus = info->system.smp_vcpus;
   qemu_info.system_emulation = info->system_emulation;
 
   // exit when in used mode
   if (!qemu_info.system_emulation) {
-    return -1;
-  }
-
-  // do not support more than one cpu
-  if (qemu_info.max_vcpus != 1) {
     return -1;
   }
 
