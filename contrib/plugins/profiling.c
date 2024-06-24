@@ -129,8 +129,10 @@ void try_profiling(unsigned int cpu_index, void *userdata) {
   uint64_t hash = (uint64_t)userdata;
   BasicBlockExecCount_t *cnt;
 
+  g_mutex_lock(&profiling_info.lock);
   cnt = g_hash_table_lookup(profiling_info.bbv, (gconstpointer)hash);
   g_assert(cnt);
+  g_mutex_unlock(&profiling_info.lock);
 
   g_mutex_lock(&profiling_info.lock);
   // add all inst
