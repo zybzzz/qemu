@@ -10,7 +10,7 @@
 #include <zlib.h>
 #include <zstd.h>
 
-static uint64_t get_next_instructions(NEMUState *ns) {
+uint64_t get_next_instructions(NEMUState *ns) {
 
     GList* first_insns_item=g_list_first(ns->simpoint_info.cpt_instructions);
     uint64_t insns=0;
@@ -77,27 +77,6 @@ static bool instrsCouldTakeCpt(NEMUState *ns, uint64_t icount) {
     return false;
 }
 
-static void notify_taken(NEMUState *ns, uint64_t icount) {
-    info_report("Taking checkpoint @ instruction count %lu", icount);
-    guint cpt_insns_list_length=g_list_length(ns->simpoint_info.cpt_instructions);
-    switch (ns->checkpoint_info.checkpoint_mode) {
-        case SimpointCheckpointing:
-
-            if (cpt_insns_list_length!=0) {
-                ns->simpoint_info.cpt_instructions=g_list_remove(ns->simpoint_info.cpt_instructions,g_list_first(ns->simpoint_info.cpt_instructions)->data);
-                ns->path_manager.checkpoint_path_list=g_list_remove(ns->path_manager.checkpoint_path_list,g_list_first(ns->path_manager.checkpoint_path_list)->data);
-            }
-
-            info_report("left checkpoint numbers: %d",g_list_length(ns->simpoint_info.cpt_instructions));
-            break;
-        case UniformCheckpointing:
-            ns->checkpoint_info.next_uniform_point += ns->checkpoint_info.cpt_interval;
-            break;
-        default:
-            break;
-    }
-}
-
 static void serialize(NEMUState *ns, uint64_t icount) {
     serializeRegs(0, ns->memory, &single_core_rvgcvh_default_memlayout, 1, 0);
     serialize_pmem(icount, false, NULL, 0);
@@ -120,7 +99,7 @@ bool single_core_try_take_cpt(NEMUState *ns, uint64_t icount) {
     uint64_t workload_exec_insns = icount - get_kernel_insns();
     if (could_take_checkpoint(ns, workload_exec_insns)) {
         serialize(ns, workload_exec_insns);
-        notify_taken(ns, workload_exec_insns);
+        update_cpt_limit_instructions(ns, workload_exec_insns);
         return true;
     }
     return false;

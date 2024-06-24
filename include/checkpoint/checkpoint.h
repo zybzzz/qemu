@@ -45,4 +45,6 @@ bool try_take_cpt(uint64_t inst_count, uint64_t cpu_idx, bool exit_sync_period);
 void multicore_checkpoint_init(MachineState *ns);
 void checkpoint_gen_empty_callback(void);
 void try_set_mie(void *env);
+uint64_t get_next_instructions(NEMUState *ns);
+void update_cpt_limit_instructions(NEMUState *ns, uint64_t icount);
 #endif

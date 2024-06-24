@@ -65,33 +65,24 @@ static uint64_t workload_insns(int cpu_index)
     return env->profiling_insns - env->last_seen_insns;
 }
 
-// prepare merge single core checkpoint
-static uint64_t get_next_instructions(void)
-{
-    return 0;
-}
-
 static uint64_t cpt_limit_instructions(NEMUState *ns)
 {
     if (ns->checkpoint_info.checkpoint_mode == UniformCheckpointing) {
         return ns->checkpoint_info.next_uniform_point;
-    } else {
-        return get_next_instructions();
+    } else if (ns->checkpoint_info.checkpoint_mode == SimpointCheckpointing) {
+        return get_next_instructions(ns);
+    }{
+        return 0;
     }
 }
 
 static uint64_t sync_limit_instructions(NEMUState *ns)
 {
-    return ns->sync_info.sync_interval;
-}
-
-static void update_uniform_limit_inst(NEMUState *ns, bool taken_cpt)
-{
-    if (taken_cpt) {
-        ns->checkpoint_info.next_uniform_point += ns->checkpoint_info.cpt_interval;
+    if (ns->checkpoint_info.checkpoint_mode == UniformCheckpointing) {
+        return ns->sync_info.sync_interval;
+    }else {
+        return cpt_limit_instructions(ns);
     }
-    ns->sync_info.next_sync_point += ns->sync_info.sync_interval;
-    memset(ns->sync_info.early_exit, 0, ns->sync_info.cpus * sizeof(bool));
 }
 
 __attribute_maybe_unused__ static int get_env_cpu_mode(uint64_t cpu_idx)
@@ -150,6 +141,7 @@ static bool sync_and_check_take_checkpoint(NEMUState *ns,
         }
     }
 
+    // set halt flag manually
     if (early_exit) {
         CPUState *cs = qemu_get_cpu(cpu_idx);
         cs->halted = 1;
@@ -161,32 +153,35 @@ static bool sync_and_check_take_checkpoint(NEMUState *ns,
     int halt_cpus = 0; //  not exited but halt
 
     for (int i = 0; i < ns->sync_info.cpus; i++) {
-        // idx i hart less than limit instructions and workload not exit, this
+        // idx i hart more than limit instructions and workload not exit, this
         // hart could wait
+        // count online cpu
         if (ns->sync_info.workload_exit_percpu[i] != 0x1) {
             online_cpus += 1;
         }
+
+        // count halt
         CPUState *cs = qemu_get_cpu(i);
         bool halt = cs->halted == 1;
-        bool this_cpu_exit_sync_period =
-            i == cpu_idx ? early_exit : ((ns->sync_info).early_exit[i]);
         if (ns->sync_info.workload_exit_percpu[i] != 0x1 && halt) {
             halt_cpus += 1;
-        }//sync_limit_instructions()
-        if (this_cpu_exit_sync_period || halt ||
-            workload_insns(i) >= cpt_limit_instructions(ns)) {
+        }
+
+        // halt or workload insns >= sync limit -> goto wait
+        if (halt || workload_insns(i) >= sync_limit_instructions(ns)) {
             if (ns->sync_info.workload_exit_percpu[i] != 0x1) {
                 wait_cpus += 1;
             }
         }
     }
 
-    // when set limit instructions, hart must goto wait
-//sync_limit_instructions()
+    // if this cpu get early wait, could go on
     if (early_exit) {
         ns->sync_info.early_exit[cpu_idx] = true;
-    } else if (workload_exec_insns >= cpt_limit_instructions(ns)) {
+    // if not get early wait but get limit instructions, could go on
+    } else if (workload_exec_insns >= sync_limit_instructions(ns)) {
         ns->sync_info.workload_insns[cpu_idx] = workload_exec_insns;
+    // else must goto failed
     } else {
 #ifndef NO_PRINT
         if (r < 10 || (wait_cpus == 1)) {
@@ -205,7 +200,14 @@ static bool sync_and_check_take_checkpoint(NEMUState *ns,
         goto wait;
     }
 
-    *should_take_cpt = workload_exec_insns >= cpt_limit_instructions(ns);
+    uint64_t limit_instructions = cpt_limit_instructions(ns);
+    if (limit_instructions == 0) {
+        *should_take_cpt = 0;
+    } else if(workload_exec_insns >= limit_instructions){
+        *should_take_cpt = 1;
+    } else {
+        *should_take_cpt = 0;
+    }
 
     g_mutex_unlock(&sync_lock);
     // all hart get sync node
@@ -313,6 +315,33 @@ static bool all_cpu_exit(NEMUState *ns, uint64_t cpu_idx)
     }
 }
 
+static void update_sync_interval(NEMUState *ns){
+    switch (ns->checkpoint_info.checkpoint_mode) {
+        case UniformCheckpointing:
+            ns->sync_info.next_sync_point += ns->sync_info.sync_interval;
+            break;
+        case SimpointCheckpointing:
+            break;
+        default:
+            break;
+    }
+}
+
+static void update_last_seen_insns(NEMUState *ns){
+    switch (ns->checkpoint_info.checkpoint_mode) {
+        case UniformCheckpointing:
+            for (int i = 0; i < ns->sync_info.cpus; i++) {
+                CPUState *cs = qemu_get_cpu(i);
+                CPURISCVState *env = cpu_env(cs);
+                env->last_seen_insns = env->profiling_insns;
+            }
+            break;
+        case SimpointCheckpointing:
+            break;
+        default:
+            break;
+    }
+}
 
 bool multi_core_try_take_cpt(NEMUState* ns, uint64_t icount, uint64_t cpu_idx,
                              bool exit_sync_period)
@@ -320,15 +349,9 @@ bool multi_core_try_take_cpt(NEMUState* ns, uint64_t icount, uint64_t cpu_idx,
     if (ns->checkpoint_info.checkpoint_mode == NoCheckpoint) {
         return false;
     }
-    
-    if (ns->checkpoint_info.checkpoint_mode == UniformCheckpointing) {
-    }
-    
-    if (ns->checkpoint_info.checkpoint_mode == SimpointCheckpointing) {
-
-    }
 
     bool should_take_cpt = false;
+    
     if (sync_and_check_take_checkpoint(ns, workload_insns(cpu_idx), cpu_idx,
                                        &should_take_cpt, exit_sync_period)) {
 #ifndef NO_PRINT
@@ -358,13 +381,16 @@ bool multi_core_try_take_cpt(NEMUState* ns, uint64_t icount, uint64_t cpu_idx,
 #endif
         }
 
-        if (ns->checkpoint_info.checkpoint_mode == UniformCheckpointing) {
-            update_uniform_limit_inst(ns, should_take_cpt);
+        if (should_take_cpt) {
+            if (ns->checkpoint_info.checkpoint_mode == UniformCheckpointing) {
+                // update checkpoint limit instructions
+                update_cpt_limit_instructions(ns, icount);
+                // update sync interval
+                update_sync_interval(ns);
+                // reset status
+                memset(ns->sync_info.early_exit, 0, ns->sync_info.cpus * sizeof(bool));
 
-            for (int i = 0; i < ns->sync_info.cpus; i++) {
-                CPUState *cs = qemu_get_cpu(i);
-                CPURISCVState *env = cpu_env(cs);
-                env->last_seen_insns = env->profiling_insns;
+                update_last_seen_insns(ns);
             }
         }
 
