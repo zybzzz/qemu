@@ -13,9 +13,10 @@
 uint64_t get_next_instructions(NEMUState *ns) {
 
     GList* first_insns_item=g_list_first(ns->simpoint_info.cpt_instructions);
-    uint64_t insns=0;
     if (first_insns_item==NULL) {
-        return insns;
+        extern bool simpoint_checkpoint_exit;
+        simpoint_checkpoint_exit = true; 
+        return 0;
     } else {
         if (first_insns_item->data==0) {
             ns->simpoint_info.cpt_instructions=g_list_remove(ns->simpoint_info.cpt_instructions,g_list_first(ns->simpoint_info.cpt_instructions)->data);

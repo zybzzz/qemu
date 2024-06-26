@@ -28,6 +28,7 @@ GCond sync_signal;
 #define NO_PRINT
 
 static uint64_t global_mtime = 0;
+bool simpoint_checkpoint_exit = false;
 
 __attribute__((unused)) static void set_global_mtime(void)
 { // maybe unused
@@ -58,14 +59,14 @@ void multicore_checkpoint_init(MachineState *machine)
     g_mutex_unlock(&sync_lock);
 }
 
-static uint64_t workload_insns(int cpu_index)
+static inline uint64_t workload_insns(int cpu_index)
 {
     CPUState *cs = qemu_get_cpu(cpu_index);
     CPURISCVState *env = cpu_env(cs);
     return env->profiling_insns - env->last_seen_insns;
 }
 
-static uint64_t cpt_limit_instructions(NEMUState *ns)
+static inline uint64_t cpt_limit_instructions(NEMUState *ns)
 {
     if (ns->checkpoint_info.checkpoint_mode == UniformCheckpointing) {
         return ns->checkpoint_info.next_uniform_point;
@@ -76,7 +77,7 @@ static uint64_t cpt_limit_instructions(NEMUState *ns)
     }
 }
 
-static uint64_t sync_limit_instructions(NEMUState *ns)
+static inline uint64_t sync_limit_instructions(NEMUState *ns)
 {
     if (ns->checkpoint_info.checkpoint_mode == UniformCheckpointing) {
         return ns->sync_info.sync_interval;
@@ -106,6 +107,7 @@ static bool sync_and_check_take_checkpoint(NEMUState *ns,
     }
 #endif
     g_mutex_lock(&sync_lock);
+
     // single cpu check
     if (ns->sync_info.workload_loaded_percpu[cpu_idx] != 0x1) {
 #ifndef NO_PRINT
@@ -126,7 +128,7 @@ static bool sync_and_check_take_checkpoint(NEMUState *ns,
         goto failed;
     }
 
-    // all cpu check, do not wait for before workload
+    // all cpu check, do not wait other core exec before workload
     for (int i = 0; i < ns->sync_info.cpus; i++) {
         if (ns->sync_info.workload_loaded_percpu[i] != 0x1) {
 #ifndef NO_PRINT
@@ -294,8 +296,10 @@ static bool all_cpu_exit(NEMUState *ns, uint64_t cpu_idx)
     fprintf(stderr, "%s: cpu %ld trying to obtain lock\n", __func__, cpu_idx);
 #endif
     g_mutex_lock(&sync_lock);
+
     int load_worload_num = 0;
     int exit_worload_num = 0;
+
     for (int i = 0; i < ns->sync_info.cpus; i++) {
         if (ns->sync_info.workload_loaded_percpu[i] == 0x1) {
             load_worload_num++;
@@ -382,16 +386,14 @@ bool multi_core_try_take_cpt(NEMUState* ns, uint64_t icount, uint64_t cpu_idx,
         }
 
         if (should_take_cpt) {
-            if (ns->checkpoint_info.checkpoint_mode == UniformCheckpointing) {
-                // update checkpoint limit instructions
-                update_cpt_limit_instructions(ns, icount);
-                // update sync interval
-                update_sync_interval(ns);
-                // reset status
-                memset(ns->sync_info.early_exit, 0, ns->sync_info.cpus * sizeof(bool));
+            // update checkpoint limit instructions
+            update_cpt_limit_instructions(ns, icount);
+            // update sync interval
+            update_sync_interval(ns);
+            // reset status
+            memset(ns->sync_info.early_exit, 0, ns->sync_info.cpus * sizeof(bool));
 
-                update_last_seen_insns(ns);
-            }
+            update_last_seen_insns(ns);
         }
 
         // reset self flag
@@ -404,7 +406,7 @@ bool multi_core_try_take_cpt(NEMUState* ns, uint64_t icount, uint64_t cpu_idx,
         g_mutex_unlock(&sync_lock);
     }
 
-    if (ns->checkpoint_info.workload_exit && all_cpu_exit(ns, cpu_idx)) {
+    if ((ns->checkpoint_info.workload_exit && all_cpu_exit(ns, cpu_idx)) || simpoint_checkpoint_exit) {
         // exit;
         qemu_system_shutdown_request(SHUTDOWN_CAUSE_HOST_QMP_QUIT);
     }
