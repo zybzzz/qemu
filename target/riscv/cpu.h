@@ -466,6 +466,7 @@ struct CPUArchState {
 
     uint64_t profiling_insns;
     uint64_t last_seen_insns;
+    uint64_t kernel_insns;
 
 #ifdef CONFIG_KVM
     /* kvm timer */

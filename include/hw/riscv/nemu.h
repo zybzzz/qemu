@@ -18,7 +18,6 @@ typedef struct NEMUConfig{} NEMUConfig;
 
 typedef struct Checkpoint{
     uint64_t cpt_interval;
-    uint64_t sync_interval;
     uint64_t warmup_interval;
     uint64_t next_uniform_point;
     uint64_t checkpoint_mode;
@@ -30,6 +29,7 @@ enum CheckpointState{
     NoCheckpoint=0,
     SimpointCheckpointing,
     UniformCheckpointing,
+    SyncUniformCheckpoint,
 };
 
 typedef struct PathManager{
@@ -74,16 +74,13 @@ struct NEMUState{
 
     char* checkpoint;
     char* gcpt_restore;
+    char* config_name;
+    char* output_base_dir;
+
     char* simpoint_path;
     char* workload_name;
-    char* cpt_interval;
-    char* warmup_interval;
-    char* sync_interval;
-    char* output_base_dir;
-    char* config_name;
 
     NEMUConfig cfg;
-
     char* memory;
     char* gcpt_memory;
 

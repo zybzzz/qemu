@@ -10,12 +10,11 @@
 #include <zlib.h>
 #include <zstd.h>
 
-uint64_t get_next_instructions(NEMUState *ns) {
+uint64_t simpoint_get_next_instructions(NEMUState *ns) {
 
     GList* first_insns_item=g_list_first(ns->simpoint_info.cpt_instructions);
     if (first_insns_item==NULL) {
-        extern bool simpoint_checkpoint_exit;
-        simpoint_checkpoint_exit = true; 
+        set_simpoint_checkpoint_exit();
         return 0;
     } else {
         if (first_insns_item->data==0) {
@@ -41,7 +40,7 @@ static uint64_t get_kernel_insns(void){
 }
 
 static bool instrsCouldTakeCpt(NEMUState *ns, uint64_t icount) {
-    uint64_t limit_instructions = get_next_instructions(ns);
+    uint64_t limit_instructions = simpoint_get_next_instructions(ns);
     if (limit_instructions==0) {
 //        error_printf("simpoint file or weight file error, get limit_instructions 0\n");
         return false;

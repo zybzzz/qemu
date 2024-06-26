@@ -12,6 +12,7 @@
 #define USE_ZSTD_COMPRESS
 
 void update_cpt_limit_instructions(NEMUState *ns, uint64_t icount) {
+
     info_report("Taking checkpoint @ instruction count %lu", icount);
     guint cpt_insns_list_length=g_list_length(ns->simpoint_info.cpt_instructions);
     switch (ns->checkpoint_info.checkpoint_mode) {
@@ -24,6 +25,9 @@ void update_cpt_limit_instructions(NEMUState *ns, uint64_t icount) {
             info_report("left checkpoint numbers: %d",g_list_length(ns->simpoint_info.cpt_instructions));
             break;
         case UniformCheckpointing:
+            ns->checkpoint_info.next_uniform_point += ns->checkpoint_info.cpt_interval;
+            break;
+        case SyncUniformCheckpoint:
             ns->checkpoint_info.next_uniform_point += ns->checkpoint_info.cpt_interval;
             break;
         default:
@@ -50,17 +54,16 @@ void serialize_pmem(uint64_t inst_count, int using_gcpt_mmio, char* hardware_sta
         gcpt_mmio_pmem_size += buffer_size;
     }
 
-#define FILEPATH_BUF_SIZE 256
+#define FILEPATH_BUF_SIZE 1024
     char filepath[FILEPATH_BUF_SIZE];
 
     //prepare path
     if (ns->checkpoint_info.checkpoint_mode == SimpointCheckpointing) {
         strcpy(filepath,((GString*)(g_list_first(ns->path_manager.checkpoint_path_list)->data))->str);
-    }else if(ns->checkpoint_info.checkpoint_mode==UniformCheckpointing){
+    }else if(ns->checkpoint_info.checkpoint_mode==UniformCheckpointing || ns->checkpoint_info.checkpoint_mode == SyncUniformCheckpoint){
         sprintf(filepath, "%s/%ld/_%ld_.gz", ns->path_manager.uniform_path->str, inst_count, inst_count);
     }
-
-    info_report("prepare for generate checkpoint path %s pmem_size %ld\n",filepath,guest_pmem_size);
+    info_report("prepare for generate checkpoint path %s base_path %s inst_count %ld pmem_size %ld\n", filepath, ns->path_manager.uniform_path->str, inst_count, guest_pmem_size);
     assert(g_mkdir_with_parents(g_path_get_dirname(filepath), 0775)==0);
 
 #ifdef USE_ZSTD_COMPRESS
