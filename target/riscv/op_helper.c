@@ -31,8 +31,9 @@ void helper_nemu_trap(CPURISCVState *env, target_ulong a0) {
 
 #define DISABLE_TIME_INTR 0x100
 #define NOTIFY_PROFILER 0x101
-#define NOTIFY_PROFILE_EXIT 0x102
-#define NOTIFY_WORKLOAD_EXIT 0x103
+#define NOTIFY_WORKLOAD_EXIT 0x102
+    
+    // nemu trap -> nemu_singal(GOOD_TRAP)
 #define GOOD_TRAP 0x0
 
     CPUState *cs = env_cpu(env);
@@ -60,15 +61,19 @@ void helper_nemu_trap(CPURISCVState *env, target_ulong a0) {
         ns->checkpoint_info.workload_exit = true;
         printf("Notify cpu index %d nemu_trap get insns %ld get worklaod exit\n",
         cs->cpu_index, env->profiling_insns);
-    } else if (a0 == NOTIFY_PROFILE_EXIT) {
-        // sig profiling exit
-        printf("cpu index %d nemu_trap get insns %ld\n", cs->cpu_index,
-        env->profiling_insns);
     } else if(a0 == GOOD_TRAP){
-        // exit
-        printf("Hit GOOD TRAP\n");
-        qemu_system_shutdown_request(SHUTDOWN_CAUSE_HOST_QMP_QUIT);
+        // exit when in simpoint profiling mode
+        // 
+        if (ns->checkpoint_info.checkpoint_mode == NoCheckpoint) {
+            if (cs->cpu_index != 0) {
+                goto exit;
+            }else {
+                printf("Hit GOOD TRAP\n");
+                qemu_system_shutdown_request(SHUTDOWN_CAUSE_HOST_QMP_QUIT);
+            }
+        }
     }
+exit:
     g_mutex_unlock(&sync_lock);
 }
 
