@@ -1,5 +1,4 @@
 #include "checkpoint/checkpoint.h"
-#include "checkpoint/directed_tbs.h"
 #include "cpu_bits.h"
 #include "exec/cpu-common.h"
 #include "hw/core/cpu.h"
@@ -28,12 +27,7 @@
 #include <unistd.h>
 
 GMutex sync_lock;
-SyncControlInfo sync_control_info;
-Qemu2Detail q2d_buf;
 GCond sync_signal;
-
-int d2q_fifo;
-int q2d_fifo;
 
 #define NO_PRINT
 
@@ -49,7 +43,6 @@ __attribute__((unused)) static void set_global_mtime(void)
     cpu_physical_memory_read(CLINT_MMIO + CLINT_MTIME, &global_mtime, 8);
 }
 
-static bool try_take_single_core_checkpoint = false;
 void multicore_checkpoint_init(MachineState *machine)
 {
     MachineState *ms = machine;
@@ -62,7 +55,7 @@ void multicore_checkpoint_init(MachineState *machine)
 
     ns->sync_info.cpus = cpus;
     if (cpus == 1) {
-        try_take_single_core_checkpoint = true;
+        ns->single_core_cpt = true;
     }
 
     ns->sync_info.workload_exit_percpu = g_malloc0(cpus * sizeof(uint8_t));
@@ -73,14 +66,14 @@ void multicore_checkpoint_init(MachineState *machine)
 
     if (ns->checkpoint_info.checkpoint_mode == SyncUniformCheckpoint) {
         const char *detail_to_qemu_fifo_name = "./detail_to_qemu.fifo";
-        d2q_fifo = open(detail_to_qemu_fifo_name, O_RDONLY);
+        ns->d2q_fifo = open(detail_to_qemu_fifo_name, O_RDONLY);
 
         const char *qemu_to_detail_fifo_name = "./qemu_to_detail.fifo";
-        q2d_fifo = open(qemu_to_detail_fifo_name, O_WRONLY);
+        ns->q2d_fifo = open(qemu_to_detail_fifo_name, O_WRONLY);
 
-        sync_control_info.info_vaild_periods = 1;
+        ns->sync_control_info.info_vaild_periods = 1;
         for (int i = 0; i < 8; i++) {
-            sync_control_info.u_arch_info.CPI[i] = 1;
+            ns->sync_control_info.u_arch_info.CPI[i] = 1;
         }
     }
     g_mutex_unlock(&sync_lock);
@@ -95,6 +88,7 @@ static inline uint64_t relative_kernel_exec_insns(int cpu_index){
 static inline uint64_t relative_last_sync_insns(int cpu_index){
     CPUState *cs = qemu_get_cpu(cpu_index);
     CPURISCVState *env = cpu_env(cs);
+    // simpoint checkpoint never update last_seen_insns when before_workload exec
     return env->profiling_insns - env->last_seen_insns;
 }
 
@@ -114,11 +108,14 @@ static inline uint64_t cpt_limit_instructions(NEMUState *ns)
 static inline uint64_t sync_limit_instructions(NEMUState *ns, uint64_t cpu_idx)
 {
     if (ns->checkpoint_info.checkpoint_mode == SyncUniformCheckpoint) {
+        // sync uniform limit insns from detail model
         return (uint64_t)((double)ns->sync_info.sync_interval /
-                      sync_control_info.u_arch_info.CPI[cpu_idx]);
+                      ns->sync_control_info.u_arch_info.CPI[cpu_idx]);
     }else if (ns->checkpoint_info.checkpoint_mode == UniformCheckpointing) {
-        return ns->checkpoint_info.next_uniform_point;
+        // sync last insns, so using cpt interval
+        return ns->checkpoint_info.cpt_interval;
     }else if (ns->checkpoint_info.checkpoint_mode == SimpointCheckpointing){
+        // simpoint checkpoint sync insns is next checkpoint insns
         return simpoint_get_next_instructions(ns);
     }else {
         return 0;
@@ -361,31 +358,17 @@ static bool all_cpu_exit(NEMUState *ns, uint64_t cpu_idx)
 }
 
 static inline void send_fifo(NEMUState *ns){
-    q2d_buf.cpt_ready = true;
+    ns->q2d_buf.cpt_ready = true;
     // q2d_buf.cpt_id = 0;
     // q2d_buf.total_inst_count = checkpoint.next_uniform_point;
-    write(q2d_fifo, &q2d_buf, sizeof(Qemu2Detail));
+    write(ns->q2d_fifo, &ns->q2d_buf, sizeof(Qemu2Detail));
 }
 
 static inline void read_fifo(NEMUState *ns){
-    sync_control_info.info_vaild_periods -= 1;
-    if (sync_control_info.info_vaild_periods <= 0) {
-        read(d2q_fifo, &sync_control_info.u_arch_info,
+    ns->sync_control_info.info_vaild_periods -= 1;
+    if (ns->sync_control_info.info_vaild_periods <= 0) {
+        read(ns->d2q_fifo, &ns->sync_control_info.u_arch_info,
              sizeof(Detail2Qemu));
-    }
-}
-
-static void update_sync_interval(NEMUState *ns){
-    switch (ns->checkpoint_info.checkpoint_mode) {
-        case SyncUniformCheckpoint:
-            break;
-        case SimpointCheckpointing:
-            break;
-        case UniformCheckpointing:
-            ns->sync_info.next_sync_point += ns->sync_info.sync_interval;
-            break;
-        default:
-            break;
     }
 }
 
@@ -446,18 +429,17 @@ bool multi_core_try_take_cpt(NEMUState* ns, uint64_t icount, uint64_t cpu_idx,
         }
 
         if (should_take_cpt) {
-            // send fifo message
-            q2d_buf.cpt_id = cpt_limit_instructions(ns);
-            q2d_buf.total_inst_count = relative_kernel_exec_insns(cpu_idx);
-            send_fifo(ns);
-            // when period <= 0, next cpi will update
-            read_fifo(ns);
+            if (ns->checkpoint_info.checkpoint_mode == SyncUniformCheckpoint) {
+                // send fifo message
+                ns->q2d_buf.cpt_id = cpt_limit_instructions(ns);
+                ns->q2d_buf.total_inst_count = relative_kernel_exec_insns(cpu_idx);
+                send_fifo(ns);
+                // when period <= 0, next cpi will update
+                read_fifo(ns);
+            }
             // update checkpoint limit instructions
             update_cpt_limit_instructions(ns, icount);
         }
-
-        // update sync interval
-        update_sync_interval(ns);
 
         update_last_seen_insns(ns);
 
@@ -482,13 +464,14 @@ bool multi_core_try_take_cpt(NEMUState* ns, uint64_t icount, uint64_t cpu_idx,
     return false;
 }
 
-void try_set_mie(void *env)
+void try_set_mie(void *env, NEMUState *ns)
 {
-    if (try_take_single_core_checkpoint) {
+    if (ns->single_core_cpt) {
         ((CPURISCVState *)env)->mie =
             (((CPURISCVState *)env)->mie & (~(1 << 7)));
         ((CPURISCVState *)env)->mie =
             (((CPURISCVState *)env)->mie & (~(1 << 5)));
+        info_report("Notify: disable timmer interrupr");
     }
 }
 
@@ -501,7 +484,7 @@ bool try_take_cpt(uint64_t inst_count, uint64_t cpu_idx, bool exit_sync_period)
         return false;
     }
 
-    if (try_take_single_core_checkpoint) {
+    if (ns->single_core_cpt) {
         return single_core_try_take_cpt(ns, inst_count);
     } else {
         return multi_core_try_take_cpt(ns, inst_count, cpu_idx, exit_sync_period);

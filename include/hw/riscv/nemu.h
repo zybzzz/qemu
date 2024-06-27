@@ -5,6 +5,7 @@
 #include "hw/riscv/riscv_hart.h"
 #include "hw/sysbus.h"
 #include "stdint.h"
+#include "checkpoint/directed_tbs.h"
 
 #define NEMU_CPUS_MAX 128
 #define NEMU_CPUS_MIN 1
@@ -34,10 +35,8 @@ enum CheckpointState{
 
 typedef struct PathManager{
     GString *base_dir;
-
     GString *workload_name;
     GString *config_name;
-    GString *output_path;
 
     GString *simpoint_path;
     GString *uniform_path;
@@ -56,7 +55,6 @@ typedef struct sync_info{
     uint64_t *workload_insns;
     bool *early_exit;  // such as wfi
     uint64_t cpus;
-    uint64_t next_sync_point;
     bool *checkpoint_end;
 }SyncInfo_t;
 
@@ -71,14 +69,16 @@ struct NEMUState{
     PathManager_t path_manager;
     SimpointInfo_t simpoint_info;
     SyncInfo_t sync_info;
+    SyncControlInfo sync_control_info;
+    Qemu2Detail q2d_buf;
 
+    bool single_core_cpt;
     char* checkpoint;
     char* gcpt_restore;
-    char* config_name;
-    char* output_base_dir;
 
     char* simpoint_path;
-    char* workload_name;
+    int d2q_fifo;
+    int q2d_fifo;
 
     NEMUConfig cfg;
     char* memory;

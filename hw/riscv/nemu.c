@@ -244,7 +244,7 @@ static void init_serializer(MachineState *machine)
                     s->checkpoint_info.cpt_interval);
         s->checkpoint_info.next_uniform_point = s->checkpoint_info.cpt_interval;
     } else if (s->checkpoint_info.checkpoint_mode == SyncUniformCheckpoint){
-        s->sync_info.next_sync_point = 1 * 1000 * 1000;
+        s->checkpoint_info.next_uniform_point = s->checkpoint_info.cpt_interval;
     }
     else{
         error_report("Checkpoint mode just support SimpointCheckpoint and "
@@ -309,22 +309,20 @@ static void init_path_manager(MachineState *machine)
     char base_output_path[1024];
 
     // we need to reorganize path as /output_base_dir/config_name/workload_name
-    assert(s->workload_name);
-    s->path_manager.workload_name = g_string_new(s->workload_name);
-    assert(s->output_base_dir);
-    s->path_manager.base_dir = g_string_new(s->output_base_dir);
-    assert(s->config_name);
-    s->path_manager.config_name = g_string_new(s->config_name);
+    assert(s->path_manager.workload_name);
+//    s->path_manager.workload_name = g_string_new(s->workload_name);
+    assert(s->path_manager.base_dir);
+//    s->path_manager.base_dir = g_string_new(s->output_base_dir);
+    assert(s->path_manager.config_name);
+//    s->path_manager.config_name = g_string_new(s->config_name);
 
-    if (strlen(s->workload_name) + strlen(s->output_base_dir) +
-            strlen(s->config_name) >=
-        1024) {
+    if ((s->path_manager.workload_name->len + s->path_manager.base_dir->len + s->path_manager.config_name->len) >= 1024) {
         error_report(
             "/output_base_dir/config_name/workload_name string too long");
     }
 
-    sprintf(base_output_path, "%s/%s/%s", s->output_base_dir, s->config_name,
-            s->workload_name);
+    sprintf(base_output_path, "%s/%s/%s", s->path_manager.base_dir->str, s->path_manager.config_name->str,
+            s->path_manager.workload_name->str);
 
     info_report("PathManager: Checkpoint output path %s", base_output_path);
 
@@ -389,10 +387,10 @@ static void init_path_manager(MachineState *machine)
 
 static void simpoint_init(MachineState *machine)
 {
-    NEMUState *s = NEMU_MACHINE(machine);
+    NEMUState *ns = NEMU_MACHINE(machine);
     // As long as it is not NoCheckpoint mode, we need to initialize the output
     // path manager
-    if (s->checkpoint_info.checkpoint_mode != NoCheckpoint) {
+    if (ns->checkpoint_info.checkpoint_mode != NoCheckpoint) {
         init_path_manager(machine);
     }
 }
@@ -594,15 +592,15 @@ static void nemu_machine_set_gcpt_restore_path(Object *obj, const char *value,
 static void nemu_machine_set_config_name(Object *obj, const char *value,
                                          Error **errp)
 {
-    NEMUState *ms = NEMU_MACHINE(obj);
-    ms->config_name = g_strdup(value);
+    NEMUState *ns = NEMU_MACHINE(obj);
+    ns->path_manager.config_name = g_string_new(value);
 }
 
 static void nemu_machine_set_output_base_dir(Object *obj, const char *value,
                                              Error **errp)
 {
-    NEMUState *ms = NEMU_MACHINE(obj);
-    ms->output_base_dir = g_strdup(value);
+    NEMUState *ns = NEMU_MACHINE(obj);
+    ns->path_manager.base_dir = g_string_new(value);
 }
 
 static void nemu_machine_set_sync_interval(Object *obj, const char *value,
@@ -639,8 +637,8 @@ static void nemu_machine_set_simpoint_path(Object *obj, const char *value,
 static void nemu_machine_set_workload_name(Object *obj, const char *value,
                                            Error **errp)
 {
-    NEMUState *ms = NEMU_MACHINE(obj);
-    ms->workload_name = g_strdup(value);
+    NEMUState *ns = NEMU_MACHINE(obj);
+    ns->path_manager.workload_name = g_string_new(value);
 }
 
 static void nemu_machine_set_checkpoint_mode(Object *obj, const char *value,

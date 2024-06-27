@@ -44,7 +44,7 @@ void helper_nemu_trap(CPURISCVState *env, target_ulong a0) {
 
     g_mutex_lock(&sync_lock);
     if (a0 == DISABLE_TIME_INTR) {
-        try_set_mie(env);
+        try_set_mie(env ,ns);
     } else if (a0 == NOTIFY_PROFILER) {
         // workload loaded
         env->last_seen_insns = env->profiling_insns;
@@ -63,12 +63,14 @@ void helper_nemu_trap(CPURISCVState *env, target_ulong a0) {
         printf("Notify cpu index %d nemu_trap get insns %ld get worklaod exit\n",
         cs->cpu_index, env->profiling_insns);
     } else if(a0 == GOOD_TRAP){
-        // exit when in simpoint profiling mode
-        // 
-        if (ns->checkpoint_info.checkpoint_mode == NoCheckpoint) {
+        // exit when in simpoint profiling or normal running
+        if (ns->checkpoint_info.checkpoint_mode == NoCheckpoint ||
+            (ns->checkpoint_info.checkpoint_mode != SimpointCheckpointing &&
+             ns->checkpoint_info.checkpoint_mode != SyncUniformCheckpoint &&
+             ns->checkpoint_info.checkpoint_mode != UniformCheckpointing)) {
             if (cs->cpu_index != 0) {
                 goto exit;
-            }else {
+            } else {
                 printf("Hit GOOD TRAP\n");
                 qemu_system_shutdown_request(SHUTDOWN_CAUSE_HOST_QMP_QUIT);
             }
