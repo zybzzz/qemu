@@ -20,7 +20,7 @@
 
 static bool trans_nemu_trap(DisasContext *ctx, arg_nemu_trap *a)
 {
-    gen_helper_nemu_trap(tcg_env,cpu_gpr[10]);
+    gen_helper_nemu_trap(tcg_env, cpu_gpr[10]);
     return true;
 }
 

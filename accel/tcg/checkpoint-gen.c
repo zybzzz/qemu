@@ -17,25 +17,23 @@
 static void checkpoint_gen_empty_check_cb(void)
 {
     TCGv_i32 cpu_index = tcg_temp_ebb_new_i32();
-    TCGv_ptr udata = tcg_temp_ebb_new_ptr();
+    TCGv_i64 udata = tcg_temp_ebb_new_i64();
 
-    tcg_gen_movi_ptr(udata, 0);
+    tcg_gen_ld_i64(udata, tcg_env, offsetof(CPURISCVState, profiling_insns));
     tcg_gen_ld_i32(cpu_index, tcg_env,
                    -offsetof(ArchCPU, env) + offsetof(CPUState, cpu_index));
 
     gen_helper_checkpoint_sync_check(cpu_index,udata);
 
-    tcg_temp_free_ptr(udata);
     tcg_temp_free_i32(cpu_index);
+    tcg_temp_free_i64(udata);
 }
 
 void checkpoint_gen_empty_callback(void){
     checkpoint_gen_empty_check_cb();
 }
 
-// static int temp_index=0;
-void helper_checkpoint_sync_check(uint32_t cpu_index, void *udata) {
-    CPUState *cs = qemu_get_cpu(cpu_index);
-    CPURISCVState *env = cpu_env(cs);
-    try_take_cpt(env->profiling_insns, cpu_index, false);
+extern NEMUState *local_nemu_state;
+void helper_checkpoint_sync_check(uint32_t cpu_index, uint64_t udata) {
+    try_take_cpt(local_nemu_state, udata, cpu_index, false);
 }

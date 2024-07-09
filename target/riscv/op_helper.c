@@ -408,6 +408,7 @@ target_ulong helper_mret(CPURISCVState *env)
     return retpc;
 }
 
+extern NEMUState *local_nemu_state;
 void helper_wfi(CPURISCVState *env)
 {
     CPUState *cs = env_cpu(env);
@@ -425,7 +426,7 @@ void helper_wfi(CPURISCVState *env)
                (prv_u || (prv_s && get_field(env->hstatus, HSTATUS_VTW)))) {
         riscv_raise_exception(env, RISCV_EXCP_VIRT_INSTRUCTION_FAULT, GETPC());
     } else {
-        try_take_cpt(env->profiling_insns, cs->cpu_index, true);
+        try_take_cpt(local_nemu_state ,env->profiling_insns, cs->cpu_index, true);
         cs->halted = 1;
         cs->exception_index = EXCP_HLT;
         cpu_loop_exit(cs);

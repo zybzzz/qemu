@@ -56,6 +56,7 @@ typedef struct sync_info{
     bool *early_exit;  // such as wfi
     uint64_t cpus;
     bool *checkpoint_end;
+    GRWLock lock;
 }SyncInfo_t;
 
 struct NEMUState{
@@ -69,6 +70,7 @@ struct NEMUState{
     PathManager_t path_manager;
     SimpointInfo_t simpoint_info;
     SyncInfo_t sync_info;
+    CPUState **cs_vec;
     SyncControlInfo sync_control_info;
     Qemu2Detail q2d_buf;
 
