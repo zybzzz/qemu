@@ -42,42 +42,37 @@ void helper_nemu_trap(CPURISCVState *env, target_ulong a0) {
 
     fflush(stdout);
 
-    g_mutex_lock(&sync_lock);
     if (a0 == DISABLE_TIME_INTR) {
-        try_set_mie(env ,ns);
+        ns->cpt_func.try_set_mie(env ,ns);
     } else if (a0 == NOTIFY_PROFILER) {
         // workload loaded
-        env->last_seen_insns = env->profiling_insns;
-        env->kernel_insns = env->profiling_insns;
-        // multi core checkpoint
-        ns->sync_info.workload_loaded_percpu[cs->cpu_index] = 0x1;
-        // single core
-        ns->checkpoint_info.workload_loaded = true;
+        g_atomic_int_set(&ns->sync_info.online[cs->cpu_index], 1);
+        g_atomic_int_add(&ns->sync_info.online_cpus, 1);
+
+        g_atomic_pointer_set(&ns->sync_info.last_seen_insns[cs->cpu_index], env->profiling_insns);
+        g_atomic_pointer_set(&ns->sync_info.kernel_insns[cs->cpu_index], env->profiling_insns);
+
         printf("Notify cpu index %d nemu_trap get insns %ld get workload start profiling\n", cs->cpu_index,
         env->profiling_insns);
+
+//        // reset profiling insns
+//        env->profiling_insns = 0;
+
     } else if (a0 == NOTIFY_WORKLOAD_EXIT) {
-        // sig multi core exit
-        ns->sync_info.workload_exit_percpu[cs->cpu_index] = 0x1;
-        //
-        ns->checkpoint_info.workload_exit = true;
+        // notice hart exit
         printf("Notify cpu index %d nemu_trap get insns %ld get worklaod exit\n",
         cs->cpu_index, env->profiling_insns);
+        g_atomic_int_set(&ns->sync_info.online[cs->cpu_index], 0);
+        g_atomic_int_add(&ns->sync_info.online_cpus, -1);
+
+
     } else if(a0 == GOOD_TRAP){
         // exit when in simpoint profiling or normal running
-        if (ns->checkpoint_info.checkpoint_mode == NoCheckpoint ||
-            (ns->checkpoint_info.checkpoint_mode != SimpointCheckpointing &&
-             ns->checkpoint_info.checkpoint_mode != SyncUniformCheckpoint &&
-             ns->checkpoint_info.checkpoint_mode != UniformCheckpointing)) {
-            if (cs->cpu_index != 0) {
-                goto exit;
-            } else {
-                printf("Hit GOOD TRAP\n");
-                qemu_system_shutdown_request(SHUTDOWN_CAUSE_HOST_QMP_QUIT);
-            }
-        }
+        while (g_atomic_int_get(&ns->sync_info.online_cpus) != 0) {}
+        printf("Hit GOOD TRAP\n");
+        qemu_system_shutdown_request(SHUTDOWN_CAUSE_HOST_QMP_QUIT);
+
     }
-exit:
-    g_mutex_unlock(&sync_lock);
 }
 
 /* Exceptions processing helpers */

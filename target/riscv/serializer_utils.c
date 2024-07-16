@@ -11,29 +11,7 @@
 
 #define USE_ZSTD_COMPRESS
 
-void update_cpt_limit_instructions(NEMUState *ns, uint64_t icount) {
 
-    info_report("Taking checkpoint @ instruction count %lu", icount);
-    guint cpt_insns_list_length=g_list_length(ns->simpoint_info.cpt_instructions);
-    switch (ns->checkpoint_info.checkpoint_mode) {
-        case SimpointCheckpointing:
-            if (cpt_insns_list_length!=0) {
-                ns->simpoint_info.cpt_instructions=g_list_remove(ns->simpoint_info.cpt_instructions,g_list_first(ns->simpoint_info.cpt_instructions)->data);
-                ns->path_manager.checkpoint_path_list=g_list_remove(ns->path_manager.checkpoint_path_list,g_list_first(ns->path_manager.checkpoint_path_list)->data);
-            }
-
-            info_report("left checkpoint numbers: %d",g_list_length(ns->simpoint_info.cpt_instructions));
-            break;
-        case UniformCheckpointing:
-            ns->checkpoint_info.next_uniform_point += ns->checkpoint_info.cpt_interval;
-            break;
-        case SyncUniformCheckpoint:
-            ns->checkpoint_info.next_uniform_point += ns->checkpoint_info.cpt_interval;
-            break;
-        default:
-            break;
-    }
-}
 
 void serialize_pmem(uint64_t inst_count, int using_gcpt_mmio, char* hardware_status_buffer, int buffer_size)
 {

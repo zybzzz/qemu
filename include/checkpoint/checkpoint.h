@@ -39,13 +39,10 @@
 #define CLINT_MTIMECMP          0x4000
 #define CLINT_MTIME             0xBFF8
 
-bool single_core_try_take_cpt(NEMUState *ns, uint64_t icount);
-bool multi_core_try_take_cpt(NEMUState *ns, uint64_t icount,uint64_t cpu_idx, bool exit_sync_period);
-bool try_take_cpt(NEMUState *ns ,uint64_t inst_count, uint64_t cpu_idx, bool exit_sync_period);
+void single_core_try_take_cpt(NEMUState* ns, uint64_t icount, int cpu_idx, bool exit_sync_period);
+void try_take_cpt(NEMUState *ns ,uint64_t inst_count, int cpu_idx, bool exit_sync_period);
 void multicore_checkpoint_init(MachineState *ns);
 void checkpoint_gen_empty_callback(void);
-void try_set_mie(void *env, NEMUState *ns);
 uint64_t simpoint_get_next_instructions(NEMUState *ns);
-void update_cpt_limit_instructions(NEMUState *ns, uint64_t icount);
 void set_simpoint_checkpoint_exit(void);
 #endif
