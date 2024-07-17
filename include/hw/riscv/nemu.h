@@ -49,18 +49,20 @@ typedef struct SimpointInfo{
 }SimpointInfo_t;
 
 typedef struct sync_info{
-    uint64_t cpus;
+    gint cpus;
     gint *online;
     gint online_cpus;
 
     uint64_t sync_interval;
+    
+    uint64_t uniform_sync_limit;
 
     int64_t *workload_insns;
-    int64_t *last_seen_insns;
     int64_t *kernel_insns;
 
     bool *early_exit;  // such as wfi
     gint *checkpoint_end;
+    gint *waiting;
     bool prepare_exit;
 }SyncInfo_t;
 
@@ -88,7 +90,6 @@ typedef struct {
     static type name args body
 
 #define MODE_DEF_HELPER(mode, \
-    update_last_seen_insns_ret, update_last_seen_insns_name, update_last_seen_insns_args, update_last_seen_insns_body, \
     get_cpt_limit_insns_ret, get_cpt_limit_insns_name, get_cpt_limit_insns_args, get_cpt_limit_insns_body, \
     get_sync_limit_insns_ret, get_sync_limit_insns_name, get_sync_limit_insns_args, get_sync_limit_insns_body, \
     take_checkpoint_ret, take_checkpoint_name, take_checkpoint_args, take_checkpoint_body, \
@@ -96,7 +97,6 @@ typedef struct {
     update_cpt_limit_insns_ret, update_cpt_limit_insns_name, update_cpt_limit_insns_args, update_cpt_limit_insns_body, \
     set_env_mie_ret, set_env_mie_name, set_env_mie_args, set_env_mie_body, \
     update_sync_limit_instructions_ret, update_sync_limit_instructions_name, update_sync_limit_instructions_args, update_sync_limit_instructions_body) \
-DEF_FUNC(update_last_seen_insns_ret, update_last_seen_insns_name##_##mode, update_last_seen_insns_args, update_last_seen_insns_body) \
 DEF_FUNC(get_cpt_limit_insns_ret, get_cpt_limit_insns_name##_##mode, get_cpt_limit_insns_args, get_cpt_limit_insns_body) \
 DEF_FUNC(get_sync_limit_insns_ret, get_sync_limit_insns_name##_##mode, get_sync_limit_insns_args, get_sync_limit_insns_body) \
 DEF_FUNC(take_checkpoint_ret, take_checkpoint_name##_##mode, take_checkpoint_args, take_checkpoint_body) \
@@ -105,7 +105,6 @@ DEF_FUNC(update_cpt_limit_insns_ret, update_cpt_limit_insns_name##_##mode, updat
 DEF_FUNC(set_env_mie_ret, set_env_mie_name##_##mode, set_env_mie_args, set_env_mie_body) \
 DEF_FUNC(update_sync_limit_instructions_ret, update_sync_limit_instructions_name##_##mode, update_sync_limit_instructions_args, update_sync_limit_instructions_body) \
 static CheckpointFunc mode##_func = { \
-    .update_last_seen_instructions = update_last_seen_insns_name##_##mode, \
     .get_cpt_limit_instructions = get_cpt_limit_insns_name##_##mode, \
     .get_sync_limit_instructions = get_sync_limit_insns_name##_##mode, \
     .try_take_cpt = take_checkpoint_name##_##mode, \

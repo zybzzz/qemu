@@ -10,22 +10,6 @@
 #include <zlib.h>
 #include <zstd.h>
 
-uint64_t simpoint_get_next_instructions(NEMUState *ns) {
-
-    GList* first_insns_item=g_list_first(ns->simpoint_info.cpt_instructions);
-    if (first_insns_item==NULL) {
-        set_simpoint_checkpoint_exit();
-        return 0;
-    } else {
-        if (first_insns_item->data==0) {
-            ns->simpoint_info.cpt_instructions=g_list_remove(ns->simpoint_info.cpt_instructions,g_list_first(ns->simpoint_info.cpt_instructions)->data);
-            ns->path_manager.checkpoint_path_list=g_list_remove(ns->path_manager.checkpoint_path_list,g_list_first(ns->path_manager.checkpoint_path_list)->data);
-            return 0;
-        }
-        return GPOINTER_TO_UINT(first_insns_item->data) * ns->checkpoint_info.cpt_interval;
-    }
-}
-
 __attribute_maybe_unused__
 static int get_env_cpu_mode(void){
     CPUState *cs = qemu_get_cpu(0);

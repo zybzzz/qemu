@@ -49,19 +49,18 @@ void helper_nemu_trap(CPURISCVState *env, target_ulong a0) {
         g_atomic_int_set(&ns->sync_info.online[cs->cpu_index], 1);
         g_atomic_int_add(&ns->sync_info.online_cpus, 1);
 
-        g_atomic_pointer_set(&ns->sync_info.last_seen_insns[cs->cpu_index], env->profiling_insns);
         g_atomic_pointer_set(&ns->sync_info.kernel_insns[cs->cpu_index], env->profiling_insns);
 
         printf("Notify cpu index %d nemu_trap get insns %ld get workload start profiling\n", cs->cpu_index,
         env->profiling_insns);
 
-//        // reset profiling insns
-//        env->profiling_insns = 0;
-
     } else if (a0 == NOTIFY_WORKLOAD_EXIT) {
         // notice hart exit
         printf("Notify cpu index %d nemu_trap get insns %ld get worklaod exit\n",
         cs->cpu_index, env->profiling_insns);
+
+        ns->cpt_func.try_take_cpt(ns, env->profiling_insns, cs->cpu_index, true);
+
         g_atomic_int_set(&ns->sync_info.online[cs->cpu_index], 0);
         g_atomic_int_add(&ns->sync_info.online_cpus, -1);
 
