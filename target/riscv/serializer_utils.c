@@ -154,7 +154,7 @@ __attribute_maybe_unused__ void serializeRegs(int cpu_index, char *buffer, singl
             target_ulong val;
             csr_ops[i].read(env, i, &val);
             memcpy(buffer + buffer_offset + i * 8, &val, 8);
-            if (val != 0) {
+            if (val != 0 && i!= 0x300 && i != 0x341) {
                 info_report("csr id %x name %s value %lx", i, csr_ops[i].name, val);
             }
         }
@@ -248,13 +248,15 @@ __attribute_maybe_unused__ void serializeRegs(int cpu_index, char *buffer, singl
     }
     buffer_offset = cpt_percpu_layout->csr_reg_cpt_addr + 0x341 * 8;
     memcpy(buffer+buffer_offset,&tmp_mepc,8);
-    info_report("Writting mepc registers to checkpoint memory: %lx",tmp_mepc);
+    info_report("Writting mepc registers to checkpoint memory: %lx", tmp_mepc);
 
-    buffer_offset=cpt_percpu_layout->pc_cpt_addr;
-    memcpy(buffer+buffer_offset,&env->pc,8);
+    buffer_offset = cpt_percpu_layout->pc_cpt_addr;
+    memcpy(buffer + buffer_offset, &env->pc, 8);
+    info_report("Writting pc registers to checkpoint memory: %lx", env->pc);
 
-    buffer_offset=cpt_percpu_layout->mode_cpt_addr;
-    memcpy(buffer+buffer_offset,&env->priv,8);
+    buffer_offset = cpt_percpu_layout->mode_cpt_addr;
+    memcpy(buffer + buffer_offset, &env->priv, 8);
+    info_report("Writting priv mode to checkpoint memory: %lx", env->priv);
 
     uint64_t tmp_mtime_cmp;
     cpu_physical_memory_read(CLINT_MMIO+CLINT_MTIMECMP+(cpu_index*8), &tmp_mtime_cmp, 8);

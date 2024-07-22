@@ -320,11 +320,9 @@ __attribute_maybe_unused__ static inline void multicore_try_take_cpt(NEMUState* 
             }
         }
 
-//        info_report("cpu %d get broad case signal", cpu_idx);
         cpu_enable_ticks();
     }
 
-    // reset self flag
     if (simpoint_checkpoint_exit) {
         // exit;
         qemu_system_shutdown_request(SHUTDOWN_CAUSE_HOST_QMP_QUIT);
@@ -340,13 +338,12 @@ void multicore_checkpoint_init(MachineState *machine)
     local_nemu_state = ns;
 
     ns->sync_info.cpus = cpus;
-   
+
     ns->cs_vec = g_malloc0(sizeof(CPUState*)*cpus);
     for (int i = 0; i < cpus; i++) {
         ns->cs_vec[i] = qemu_get_cpu(i);
     }
-    
-    
+
     ns->sync_info.online = g_malloc0(cpus * sizeof(gint));
     ns->sync_info.online_cpus = 0;
 
@@ -355,7 +352,7 @@ void multicore_checkpoint_init(MachineState *machine)
 
     ns->sync_info.early_exit = g_malloc0(cpus * sizeof(bool));
     ns->sync_info.checkpoint_end = g_malloc0(cpus * sizeof(bool));
-    
+
     ns->sync_info.waiting = g_malloc0(cpus * sizeof(gint));
 
     ns->sync_info.uniform_sync_limit = ns->sync_info.sync_interval;
