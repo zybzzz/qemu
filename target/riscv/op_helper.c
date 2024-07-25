@@ -67,10 +67,15 @@ void helper_nemu_trap(CPURISCVState *env, target_ulong a0) {
 
     } else if(a0 == GOOD_TRAP){
         // exit when in simpoint profiling or normal running
-        while (g_atomic_int_get(&ns->sync_info.online_cpus) != 0) {}
+        if (ns->sync_info.cpus > 1) {
+            while (g_atomic_int_get(&ns->sync_info.online_cpus) != 0) {}
+        }
         printf("Hit GOOD TRAP\n");
         qemu_system_shutdown_request(SHUTDOWN_CAUSE_HOST_QMP_QUIT);
 
+    } else {
+        printf("Hit BAD TRAP %ld\n", a0);
+        qemu_system_shutdown_request(SHUTDOWN_CAUSE_HOST_QMP_QUIT);
     }
 }
 
