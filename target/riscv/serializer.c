@@ -50,7 +50,7 @@ static bool could_take_checkpoint(NEMUState *ns, uint64_t icount){
     if (ns->nemu_args.checkpoint_mode==NoCheckpoint) {
         return false;
     }
-    if (!ns->sync_info.online[0]) {
+    if (!ns->sync_info.online[0] && ns->nemu_args.skip_boot == false) {
         return false;
     }
     if (!instrsCouldTakeCpt(ns, icount)) {

@@ -633,6 +633,13 @@ static void nemu_machine_set_workload_name(Object *obj, const char *value,
     ns->nemu_args.workload_name = g_string_new(value);
 }
 
+static void nemu_machine_set_skip_boot(Object *obj, bool value,
+                                           Error **errp)
+{
+    NEMUState *ns = NEMU_MACHINE(obj);
+    ns->nemu_args.skip_boot = value;
+}
+
 static void nemu_machine_set_checkpoint_mode(Object *obj, const char *value,
                                              Error **errp)
 {
@@ -692,6 +699,8 @@ static void nemu_machine_class_init(ObjectClass *oc, void *data)
                                   nemu_machine_set_workload_name);
     object_class_property_add_str(oc, "checkpoint-mode", NULL,
                                   nemu_machine_set_checkpoint_mode);
+    object_class_property_add_bool(oc, "skip-boot", NULL,
+                                  nemu_machine_set_skip_boot);
 }
 
 static const TypeInfo nemu_machine_typeinfo = {
