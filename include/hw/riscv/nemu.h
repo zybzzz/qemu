@@ -17,55 +17,6 @@ DECLARE_INSTANCE_CHECKER(NEMUState, NEMU_MACHINE,
 
 typedef struct NEMUConfig{} NEMUConfig;
 
-typedef struct Checkpoint{
-    uint64_t cpt_interval;
-    uint64_t warmup_interval;
-    uint64_t next_uniform_point;
-    uint64_t checkpoint_mode;
-    bool workload_loaded;
-    bool workload_exit;
-}Checkpoint_t;
-
-enum CheckpointState{
-    NoCheckpoint=0,
-    SimpointCheckpointing,
-    UniformCheckpointing,
-    SyncUniformCheckpoint,
-};
-
-typedef struct PathManager{
-    GString *base_dir;
-    GString *workload_name;
-    GString *config_name;
-
-    GString *simpoint_path;
-    GString *uniform_path;
-    GList *checkpoint_path_list;
-}PathManager_t;
-
-typedef struct SimpointInfo{
-    GList *cpt_instructions;
-    GList *weights;
-}SimpointInfo_t;
-
-typedef struct sync_info{
-    gint cpus;
-    gint *online;
-    gint online_cpus;
-
-    uint64_t sync_interval;
-    
-    uint64_t uniform_sync_limit;
-
-    int64_t *workload_insns;
-    int64_t *kernel_insns;
-
-    bool *early_exit;  // such as wfi
-    gint *checkpoint_end;
-    gint *waiting;
-    bool prepare_exit;
-}SyncInfo_t;
-
 typedef uint64_t (*get_cpt_limit_instructions_func)(NEMUState *ns);
 typedef uint64_t (*get_sync_limit_instructions_func)(NEMUState *ns, int cpu_idx);
 typedef void (*try_take_cpt_func)(NEMUState* ns, uint64_t icount, int cpu_idx, bool exit_sync_period);
@@ -114,12 +65,63 @@ static CheckpointFunc mode##_func = { \
     .update_sync_limit_instructions = update_sync_limit_instructions_name##_##mode \
 };
 
+typedef struct Checkpoint{
+    uint64_t next_uniform_point;
+}Checkpoint_t;
+
+typedef struct PathManager{
+    GString *simpoint_path;
+    GString *uniform_path;
+    GList *checkpoint_path_list;
+}PathManager_t;
+
+typedef struct SimpointInfo{
+    GList *cpt_instructions;
+    GList *weights;
+}SimpointInfo_t;
+
+typedef struct sync_info{
+    gint cpus;
+    gint *online;
+    gint online_cpus;
+
+    uint64_t uniform_sync_limit;
+    int64_t *workload_insns;
+    int64_t *kernel_insns;
+
+    bool *early_exit;  // such as wfi
+    gint *checkpoint_end;
+    gint *waiting;
+}SyncInfo_t;
+
+enum CheckpointMode{
+    NoCheckpoint=0,
+    SimpointCheckpointing,
+    UniformCheckpointing,
+    SyncUniformCheckpoint,
+};
+
 typedef enum{
     RUNNING,
     WAIT,
     EXIT,
     HALT
 }CheckpointState;
+
+typedef struct{
+    char *checkpoint;
+    char *gcpt_restore;
+    char *simpoint_path;
+
+    GString *config_name;
+    GString *base_dir;
+    GString *workload_name;
+
+    uint64_t sync_interval;
+    uint64_t cpt_interval;
+    uint64_t warmup_interval;
+    uint64_t checkpoint_mode;
+}NEMUArgs_t;
 
 struct NEMUState{
     /*< private >*/
@@ -134,15 +136,11 @@ struct NEMUState{
     SyncInfo_t sync_info;
     CheckpointFunc cpt_func;
 
-    CPUState **cs_vec;
+    struct CPUState **cs_vec;
     SyncControlInfo sync_control_info;
     Qemu2Detail q2d_buf;
+    NEMUArgs_t nemu_args;
 
-    bool single_core_cpt;
-    char* checkpoint;
-    char* gcpt_restore;
-
-    char* simpoint_path;
     int d2q_fifo;
     int q2d_fifo;
 

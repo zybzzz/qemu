@@ -71,16 +71,16 @@ inline uint64_t simpoint_get_next_instructions(NEMUState *ns)
             return LONG_LONG_MAX;
         }
         return GPOINTER_TO_UINT(first_insns_item->data) *
-               ns->checkpoint_info.cpt_interval;
+               ns->nemu_args.cpt_interval;
     }
 }
 
-MODE_DEF_HELPER(simpoint, 
+MODE_DEF_HELPER(simpoint,
     uint64_t, get_cpt_limit_instructions, (NEMUState *ns), {
         return simpoint_get_next_instructions(ns);
     },
     uint64_t, get_sync_limit_instructions, (NEMUState *ns, int cpu_idx), {
-        if (ns->sync_info.sync_interval != 0) {
+        if (ns->nemu_args.sync_interval != 0) {
             return ns->sync_info.uniform_sync_limit;
         }
         return simpoint_get_next_instructions(ns);
@@ -106,13 +106,13 @@ MODE_DEF_HELPER(simpoint,
         assert(0);
     },
     void, update_sync_limit_instructions, (NEMUState *ns), {
-        if (ns->sync_info.sync_interval != 0) {
-            ns->sync_info.uniform_sync_limit += ns->sync_info.sync_interval;
+        if (ns->nemu_args.sync_interval != 0) {
+            ns->sync_info.uniform_sync_limit += ns->nemu_args.sync_interval;
         }
     }
 )
 
-MODE_DEF_HELPER(uniform, 
+MODE_DEF_HELPER(uniform,
     uint64_t, get_cpt_limit_instructions, (NEMUState *ns), {
         return ns->checkpoint_info.next_uniform_point;
     },
@@ -125,21 +125,21 @@ MODE_DEF_HELPER(uniform,
     void, after_take_cpt, (NEMUState *ns, int cpu_idx), {
     }, 
     void, update_cpt_limit_instructions, (NEMUState *ns, uint64_t icount), {
-        ns->checkpoint_info.next_uniform_point += ns->checkpoint_info.cpt_interval;
+        ns->checkpoint_info.next_uniform_point += ns->nemu_args.cpt_interval;
     },
     void, try_set_mie, (void *env, NEMUState *ns), {
     },
     void, update_sync_limit_instructions, (NEMUState *ns), {
-        ns->sync_info.uniform_sync_limit += ns->sync_info.sync_interval;
+        ns->sync_info.uniform_sync_limit += ns->nemu_args.sync_interval;
     }
 )
 
-MODE_DEF_HELPER(sync_uni, 
+MODE_DEF_HELPER(sync_uni,
     uint64_t, get_cpt_limit_instructions, (NEMUState *ns), {
         return ns->checkpoint_info.next_uniform_point;
     },
     uint64_t, get_sync_limit_instructions, (NEMUState *ns, int cpu_idx), {
-        return (uint64_t)((double)ns->sync_info.sync_interval /
+        return (uint64_t)((double)ns->nemu_args.sync_interval /
                   ns->sync_control_info.u_arch_info.CPI[cpu_idx]);
 
     }, 
@@ -155,7 +155,7 @@ MODE_DEF_HELPER(sync_uni,
         read_fifo(ns);
     }, 
     void, update_cpt_limit_instructions, (NEMUState *ns, uint64_t icount), {
-        ns->checkpoint_info.next_uniform_point += ns->checkpoint_info.cpt_interval;
+        ns->checkpoint_info.next_uniform_point += ns->nemu_args.cpt_interval;
     },
     void, try_set_mie, (void *env, NEMUState *ns), {
     },
@@ -232,7 +232,7 @@ serialize(uint64_t memory_addr, int cpu_idx, int cpus, uint64_t inst_count)
     for (int i = 0; i < cpus; i++) {
         serializeRegs(i, (char *)(serialize_reg_base_addr + i * (1024 * 1024)),
                       &cpt_percpu_layout, cpt_header.cpu_num, global_mtime);
-        info_report("buffer %d serialize success, start addr %lx\n", i,
+        info_report("buffer %d serialize success, start addr %lx", i,
                     serialize_reg_base_addr + (i * 1024 * 1024));
     }
 
@@ -269,7 +269,7 @@ static void try_sync(NEMUState* ns, uint64_t icount, int cpu_idx,
         tmp_wait_id += 1;
         if (tmp_wait_id != ns->sync_info.online_cpus) {
             g_atomic_int_set(&ns->sync_info.waiting[cpu_idx], 1);
-            info_report("cpu %d goto wait online state %d, wait id %d instructions %ld", cpu_idx, ns->sync_info.online_cpus, tmp_wait_id, icount - ns->sync_info.kernel_insns[cpu_idx]);
+//            info_report("cpu %d goto wait online state %d, wait id %d instructions %ld", cpu_idx, ns->sync_info.online_cpus, tmp_wait_id, icount - ns->sync_info.kernel_insns[cpu_idx]);
             if (tmp_wait_id == 1) {
                 cpu_disable_ticks();
                 set_global_mtime();
@@ -280,7 +280,7 @@ static void try_sync(NEMUState* ns, uint64_t icount, int cpu_idx,
 
             g_atomic_int_set(&ns->sync_info.waiting[cpu_idx], 0);
         }else{
-            info_report("cpu %d goto sync end, cpu_online %d, wait id %d instruction count %ld", cpu_idx, ns->sync_info.online_cpus, tmp_wait_id, icount - ns->sync_info.kernel_insns[cpu_idx]);
+//            info_report("cpu %d goto sync end, cpu_online %d, wait id %d instruction count %ld", cpu_idx, ns->sync_info.online_cpus, tmp_wait_id, icount - ns->sync_info.kernel_insns[cpu_idx]);
             for (int i = 0; i < ns->sync_info.cpus; i++) {
                 if (i != cpu_idx) {
                     while (g_atomic_int_get(&ns->sync_info.waiting[i]) != 1) {}
@@ -296,7 +296,7 @@ __attribute_maybe_unused__ static inline void multicore_try_take_cpt(NEMUState* 
     bool sync_end = false;
     static uint64_t wait_times = 0;
     try_sync(ns, icount, cpu_idx, exit_sync_period, &sync_end);
-    
+
     if (sync_end) {
         g_atomic_pointer_add(&wait_times, 1);
         ns->cpt_func.update_sync_limit_instructions(ns);
@@ -329,6 +329,29 @@ __attribute_maybe_unused__ static inline void multicore_try_take_cpt(NEMUState* 
     }
 }
 
+static void sync_init(NEMUState *ns, gint cpus){
+    ns->sync_info.cpus = cpus;
+    // store online cpu info, when cpu exec before workload, online[cpu_idx] = 1
+    ns->sync_info.online = g_malloc0(cpus * sizeof(gint));
+    // store online cpu nums
+    ns->sync_info.online_cpus = 0;
+
+    // set uniform next sync limit
+    ns->sync_info.uniform_sync_limit = ns->nemu_args.sync_interval;
+
+    // store how many insts exec
+    ns->sync_info.workload_insns = g_malloc0(cpus * sizeof(int64_t));
+    // store before 'before workload' exec how many insts
+    ns->sync_info.kernel_insns = g_malloc0(cpus * sizeof(int64_t));
+
+    // if exec halt or nemu_trap, will get early exit
+    ns->sync_info.early_exit = g_malloc0(cpus * sizeof(bool));
+    // check checkpoint status
+    ns->sync_info.checkpoint_end = g_malloc0(cpus * sizeof(bool));
+    // check sync status
+    ns->sync_info.waiting = g_malloc0(cpus * sizeof(gint));
+}
+
 NEMUState *local_nemu_state;
 void multicore_checkpoint_init(MachineState *machine)
 {
@@ -337,27 +360,14 @@ void multicore_checkpoint_init(MachineState *machine)
     int64_t cpus = ms->smp.cpus;
     local_nemu_state = ns;
 
-    ns->sync_info.cpus = cpus;
+    sync_init(ns, cpus);
 
     ns->cs_vec = g_malloc0(sizeof(CPUState*)*cpus);
     for (int i = 0; i < cpus; i++) {
         ns->cs_vec[i] = qemu_get_cpu(i);
     }
 
-    ns->sync_info.online = g_malloc0(cpus * sizeof(gint));
-    ns->sync_info.online_cpus = 0;
-
-    ns->sync_info.kernel_insns = g_malloc0(cpus * sizeof(int64_t));
-    ns->sync_info.workload_insns = g_malloc0(cpus * sizeof(int64_t));
-
-    ns->sync_info.early_exit = g_malloc0(cpus * sizeof(bool));
-    ns->sync_info.checkpoint_end = g_malloc0(cpus * sizeof(bool));
-
-    ns->sync_info.waiting = g_malloc0(cpus * sizeof(gint));
-
-    ns->sync_info.uniform_sync_limit = ns->sync_info.sync_interval;
-
-    if (ns->checkpoint_info.checkpoint_mode == SyncUniformCheckpoint) {
+    if (ns->nemu_args.checkpoint_mode == SyncUniformCheckpoint) {
         const char *detail_to_qemu_fifo_name = "./detail_to_qemu.fifo";
         ns->d2q_fifo = open(detail_to_qemu_fifo_name, O_RDONLY);
 
@@ -370,7 +380,7 @@ void multicore_checkpoint_init(MachineState *machine)
         }
     }
 
-    switch (ns->checkpoint_info.checkpoint_mode) {
+    switch (ns->nemu_args.checkpoint_mode) {
         case UniformCheckpointing:
             ns->cpt_func=uniform_func;
             break;
@@ -386,9 +396,7 @@ void multicore_checkpoint_init(MachineState *machine)
     }
 
     if (cpus == 1) {
-//        ns->cpt_func.try_take_cpt = single_core_try_take_cpt;
-        // for now
-        ns->cpt_func.try_take_cpt = no_cpt_func.try_take_cpt;
+        ns->cpt_func.try_take_cpt = single_core_try_take_cpt;
         ns->cpt_func.try_set_mie = single_try_set_mie;
     }else{
         ns->cpt_func.try_set_mie = no_try_set_mie;

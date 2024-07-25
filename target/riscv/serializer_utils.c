@@ -36,12 +36,12 @@ void serialize_pmem(uint64_t inst_count, int using_gcpt_mmio, char* hardware_sta
     char filepath[FILEPATH_BUF_SIZE];
 
     //prepare path
-    if (ns->checkpoint_info.checkpoint_mode == SimpointCheckpointing) {
+    if (ns->nemu_args.checkpoint_mode == SimpointCheckpointing) {
         strcpy(filepath,((GString*)(g_list_first(ns->path_manager.checkpoint_path_list)->data))->str);
-        info_report("prepare for generate checkpoint path %s inst_count %ld pmem_size %ld\n", filepath, inst_count, guest_pmem_size);
-    }else if(ns->checkpoint_info.checkpoint_mode==UniformCheckpointing || ns->checkpoint_info.checkpoint_mode == SyncUniformCheckpoint){
+        info_report("prepare for generate checkpoint path %s inst_count %ld pmem_size %ld", filepath, inst_count, guest_pmem_size);
+    }else if(ns->nemu_args.checkpoint_mode==UniformCheckpointing || ns->nemu_args.checkpoint_mode == SyncUniformCheckpoint){
         sprintf(filepath, "%s/%ld/_%ld_.gz", ns->path_manager.uniform_path->str, inst_count, inst_count);
-        info_report("prepare for generate checkpoint path %s base_path %s inst_count %ld pmem_size %ld\n", filepath, ns->path_manager.uniform_path->str, inst_count, guest_pmem_size);
+        info_report("prepare for generate checkpoint path %s base_path %s inst_count %ld pmem_size %ld", filepath, ns->path_manager.uniform_path->str, inst_count, guest_pmem_size);
     }
     assert(g_mkdir_with_parents(g_path_get_dirname(filepath), 0775)==0);
 
@@ -73,6 +73,7 @@ void serialize_pmem(uint64_t inst_count, int using_gcpt_mmio, char* hardware_sta
     }
 
     free(compress_buffer);
+    info_report("serialize pmem finish\n");
 
 #endif
 
@@ -121,9 +122,6 @@ __attribute_maybe_unused__ void serializeRegs(int cpu_index, char *buffer, singl
     for(int i = 0 ; i < 32; i++) {
         memcpy(buffer + buffer_offset + i * 8, &env->gpr[i], 8);
         info_report("gpr %04d value %016lx ", i, env->gpr[i]);
-        if ((i + 1) % 4 == 0) {
-            printf("\n");
-        }
     }
     info_report("Writting int registers to checkpoint memory");
 
@@ -144,7 +142,7 @@ __attribute_maybe_unused__ void serializeRegs(int cpu_index, char *buffer, singl
                         env->vreg[i]);
         }
     }
-    info_report("Writting 32 * %d vector registers to checkpoint memory\n",
+    info_report("Writting 32 * %d vector registers to checkpoint memory",
             cpu->cfg.vlen / 64);
 
     // store csr regs
@@ -154,6 +152,7 @@ __attribute_maybe_unused__ void serializeRegs(int cpu_index, char *buffer, singl
             target_ulong val;
             csr_ops[i].read(env, i, &val);
             memcpy(buffer + buffer_offset + i * 8, &val, 8);
+            // mstatus and mepc will set later
             if (val != 0 && i!= 0x300 && i != 0x341) {
                 info_report("csr id %x name %s value %lx", i, csr_ops[i].name, val);
             }

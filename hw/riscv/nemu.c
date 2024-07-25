@@ -191,18 +191,18 @@ static int load_gcpt_restore(MachineState *machine,
     return 1;
 }
 
-static void init_serializer(MachineState *machine)
+static void init_limit_instructions(MachineState *machine)
 {
     NEMUState *s = NEMU_MACHINE(machine);
     FILE *simpoints_file = NULL;
     FILE *weights_file = NULL;
 
-    if (s->checkpoint_info.checkpoint_mode == SimpointCheckpointing) {
-        assert(s->checkpoint_info.cpt_interval);
+    if (s->nemu_args.checkpoint_mode == SimpointCheckpointing) {
+        assert(s->nemu_args.cpt_interval);
         info_report("Taking simpoint checkpionts with cpt interval %lu warmup "
                     "interval %lu",
-                    s->checkpoint_info.cpt_interval,
-                    s->checkpoint_info.warmup_interval);
+                    s->nemu_args.cpt_interval,
+                    s->nemu_args.warmup_interval);
 
         GString *simpoints_path = g_string_new(NULL);
         GString *weights_path = g_string_new(NULL);
@@ -239,20 +239,18 @@ static void init_serializer(MachineState *machine)
         fclose(simpoints_file);
         fclose(weights_file);
 
-    } else if (s->checkpoint_info.checkpoint_mode == UniformCheckpointing) {
+    } else if (s->nemu_args.checkpoint_mode == UniformCheckpointing) {
         info_report("Taking uniform checkpionts with interval %lu",
-                    s->checkpoint_info.cpt_interval);
-        s->checkpoint_info.next_uniform_point = s->checkpoint_info.cpt_interval;
-    } else if (s->checkpoint_info.checkpoint_mode == SyncUniformCheckpoint){
-        s->checkpoint_info.next_uniform_point = s->checkpoint_info.cpt_interval;
+                    s->nemu_args.cpt_interval);
+        s->checkpoint_info.next_uniform_point = s->nemu_args.cpt_interval;
+    } else if (s->nemu_args.checkpoint_mode == SyncUniformCheckpoint){
+        s->checkpoint_info.next_uniform_point = s->nemu_args.cpt_interval;
     }
     else{
         error_report("Checkpoint mode just support SimpointCheckpoint and "
                      "UniformCheckpoint");
         exit(1);
     }
-
-    s->checkpoint_info.workload_loaded = false;
 }
 
 static gint g_compare_path(gconstpointer a, gconstpointer b)
@@ -309,36 +307,36 @@ static void init_path_manager(MachineState *machine)
     char base_output_path[1024];
 
     // we need to reorganize path as /output_base_dir/config_name/workload_name
-    assert(s->path_manager.workload_name);
+    assert(s->nemu_args.workload_name);
 //    s->path_manager.workload_name = g_string_new(s->workload_name);
-    assert(s->path_manager.base_dir);
+    assert(s->nemu_args.base_dir);
 //    s->path_manager.base_dir = g_string_new(s->output_base_dir);
-    assert(s->path_manager.config_name);
+    assert(s->nemu_args.config_name);
 //    s->path_manager.config_name = g_string_new(s->config_name);
 
-    if ((s->path_manager.workload_name->len + s->path_manager.base_dir->len + s->path_manager.config_name->len) >= 1024) {
+    if ((s->nemu_args.workload_name->len + s->nemu_args.base_dir->len + s->nemu_args.config_name->len) >= 1024) {
         error_report(
             "/output_base_dir/config_name/workload_name string too long");
     }
 
-    sprintf(base_output_path, "%s/%s/%s", s->path_manager.base_dir->str, s->path_manager.config_name->str,
-            s->path_manager.workload_name->str);
+    sprintf(base_output_path, "%s/%s/%s", s->nemu_args.base_dir->str, s->nemu_args.config_name->str,
+            s->nemu_args.workload_name->str);
 
     info_report("PathManager: Checkpoint output path %s", base_output_path);
 
     // prepare simpoint path for init serializer
-    if (s->checkpoint_info.checkpoint_mode == SimpointCheckpointing) {
-        assert(s->simpoint_path);
-        s->path_manager.simpoint_path = g_string_new(s->simpoint_path);
+    if (s->nemu_args.checkpoint_mode == SimpointCheckpointing) {
+        assert(s->nemu_args.simpoint_path);
+        s->path_manager.simpoint_path = g_string_new(s->nemu_args.simpoint_path);
         g_string_printf(s->path_manager.simpoint_path, "%s/%s",
-                        s->simpoint_path, s->path_manager.workload_name->str);
+                        s->nemu_args.simpoint_path, s->nemu_args.workload_name->str);
     }
 
     // Simpoint need prepare_simpoint_path
     // Uniform need prepare interval
-    init_serializer(machine);
+    init_limit_instructions(machine);
 
-    if (s->checkpoint_info.checkpoint_mode == SimpointCheckpointing) {
+    if (s->nemu_args.checkpoint_mode == SimpointCheckpointing) {
 //        g_list_foreach(s->simpoint_info.cpt_instructions, prepare_output_path,
 //                       base_output_path);
         GList *iterator = NULL;
@@ -372,10 +370,10 @@ static void init_path_manager(MachineState *machine)
 
         g_list_foreach(s->path_manager.checkpoint_path_list, check_path, NULL);
         g_list_foreach(s->simpoint_info.cpt_instructions, check_instrs, NULL);
-    } else if (s->checkpoint_info.checkpoint_mode == UniformCheckpointing || s->checkpoint_info.checkpoint_mode == SyncUniformCheckpoint) {
+    } else if (s->nemu_args.checkpoint_mode == UniformCheckpointing || s->nemu_args.checkpoint_mode == SyncUniformCheckpoint) {
         s->path_manager.uniform_path = g_string_new(base_output_path);
         g_string_printf(s->path_manager.uniform_path, "%s/%s", base_output_path,
-                        s->path_manager.workload_name->str);
+                        s->nemu_args.workload_name->str);
         info_report("prepare for checkpoint %s\n",
                     s->path_manager.uniform_path->str);
     } else{
@@ -390,7 +388,7 @@ static void simpoint_init(MachineState *machine)
     NEMUState *ns = NEMU_MACHINE(machine);
     // As long as it is not NoCheckpoint mode, we need to initialize the output
     // path manager
-    if (ns->checkpoint_info.checkpoint_mode != NoCheckpoint) {
+    if (ns->nemu_args.checkpoint_mode != NoCheckpoint) {
         init_path_manager(machine);
     }
 }
@@ -410,12 +408,12 @@ static void nemu_load_firmware(MachineState *machine)
 
     //    if (firmware_name) {
 
-    if (s->checkpoint) {
-        info_report("Load checkpoint: %s", s->checkpoint);
-        g_assert(load_checkpoint(machine, s->checkpoint));
-        if (s->gcpt_restore) {
-            info_report("Load gcpt_restore: %s", s->gcpt_restore);
-            g_assert(load_gcpt_restore(machine, s->gcpt_restore));
+    if (s->nemu_args.checkpoint) {
+        info_report("Load checkpoint: %s", s->nemu_args.checkpoint);
+        g_assert(load_checkpoint(machine, s->nemu_args.checkpoint));
+        if (s->nemu_args.gcpt_restore) {
+            info_report("Load gcpt_restore: %s", s->nemu_args.gcpt_restore);
+            g_assert(load_gcpt_restore(machine, s->nemu_args.gcpt_restore));
         }
         // load checkpoint donot need to load bios or kernel
         goto prepare_start;
@@ -575,70 +573,64 @@ static void nemu_machine_instance_init(Object *obj) {}
 static void nemu_machine_set_checkpoint_path(Object *obj, const char *value,
                                              Error **errp)
 {
-    NEMUState *ms = NEMU_MACHINE(obj);
-    ms->checkpoint = g_strdup(value);
+    NEMUState *ns = NEMU_MACHINE(obj);
+    ns->nemu_args.checkpoint = g_strdup(value);
 }
 
 static void nemu_machine_set_gcpt_restore_path(Object *obj, const char *value,
                                                Error **errp)
 {
-    NEMUState *ms = NEMU_MACHINE(obj);
-
-    info_report("set gcpt_restore path");
-    g_free(ms->gcpt_restore);
-    ms->gcpt_restore = g_strdup(value);
+    NEMUState *ns = NEMU_MACHINE(obj);
+    ns->nemu_args.gcpt_restore = g_strdup(value);
 }
 
 static void nemu_machine_set_config_name(Object *obj, const char *value,
                                          Error **errp)
 {
     NEMUState *ns = NEMU_MACHINE(obj);
-    ns->path_manager.config_name = g_string_new(value);
+    ns->nemu_args.config_name = g_string_new(value);
 }
 
 static void nemu_machine_set_output_base_dir(Object *obj, const char *value,
                                              Error **errp)
 {
     NEMUState *ns = NEMU_MACHINE(obj);
-    ns->path_manager.base_dir = g_string_new(value);
+    ns->nemu_args.base_dir = g_string_new(value);
 }
 
 static void nemu_machine_set_sync_interval(Object *obj, const char *value,
                                            Error **errp)
 {
     NEMUState *ms = NEMU_MACHINE(obj);
-    ms->sync_info.sync_interval = atol(value);
+    ms->nemu_args.sync_interval = atol(value);
 }
 
 static void nemu_machine_set_cpt_interval(Object *obj, const char *value,
                                           Error **errp)
 {
     NEMUState *ms = NEMU_MACHINE(obj);
-    info_report("set cpt interval %ld", atol(value));
-    ms->checkpoint_info.cpt_interval = atol(value);
-    ms->checkpoint_info.next_uniform_point = 1;
+    ms->nemu_args.cpt_interval = atol(value);
 }
 
 static void nemu_machine_set_warmup_interval(Object *obj, const char *value,
                                              Error **errp)
 {
     NEMUState *ms = NEMU_MACHINE(obj);
-    info_report("set warmup interval");
-    ms->checkpoint_info.warmup_interval = atol(value);
+    ms->nemu_args.warmup_interval = atol(value);
 }
 
 static void nemu_machine_set_simpoint_path(Object *obj, const char *value,
                                            Error **errp)
 {
     NEMUState *ms = NEMU_MACHINE(obj);
-    ms->simpoint_path = g_strdup(value);
+    ms->nemu_args.simpoint_path = g_strdup(value);
 }
 
 static void nemu_machine_set_workload_name(Object *obj, const char *value,
                                            Error **errp)
 {
     NEMUState *ns = NEMU_MACHINE(obj);
-    ns->path_manager.workload_name = g_string_new(value);
+    ns->nemu_args.workload_name = g_string_new(value);
 }
 
 static void nemu_machine_set_checkpoint_mode(Object *obj, const char *value,
@@ -646,15 +638,15 @@ static void nemu_machine_set_checkpoint_mode(Object *obj, const char *value,
 {
     NEMUState *ms = NEMU_MACHINE(obj);
     if (strcmp(value, "NoCheckpoint") == 0) {
-        ms->checkpoint_info.checkpoint_mode = NoCheckpoint;
+        ms->nemu_args.checkpoint_mode = NoCheckpoint;
     } else if (strcmp(value, "SimpointCheckpoint") == 0) {
-        ms->checkpoint_info.checkpoint_mode = SimpointCheckpointing;
+        ms->nemu_args.checkpoint_mode = SimpointCheckpointing;
     } else if (strcmp(value, "UniformCheckpoint") == 0) {
-        ms->checkpoint_info.checkpoint_mode = UniformCheckpointing;
+        ms->nemu_args.checkpoint_mode = UniformCheckpointing;
     } else if (strcmp(value, "SyncUniformCheckpoint") == 0) {
-        ms->checkpoint_info.checkpoint_mode = SyncUniformCheckpoint;
+        ms->nemu_args.checkpoint_mode = SyncUniformCheckpoint;
     } else {
-        ms->checkpoint_info.checkpoint_mode = NoCheckpoint;
+        ms->nemu_args.checkpoint_mode = NoCheckpoint;
         error_setg(errp, "Invalid checkpoint mode");
         error_append_hint(
             errp, "Valid values are Nocheckpoint, SimpointCheckpoint, and "
