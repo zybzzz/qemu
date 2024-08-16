@@ -134,7 +134,7 @@ __attribute_maybe_unused__ void serializeRegs(int cpu_index, char *buffer, singl
 
     // store vector regs
     buffer_offset = cpt_percpu_layout->vector_reg_cpt_addr;
-    for (int i = 0; i < 32 * cpu->cfg.vlen / 64; i++) {
+    for (int i = 0; i < 32 * cpu->cfg.vlenb / 64; i++) {
         memcpy(buffer + buffer_offset + i * 8, &env->vreg[i], 8);
         if ((i + 1) % (2) == 0) {
             info_report("[%lx]: 0x%016lx_%016lx",
@@ -143,7 +143,7 @@ __attribute_maybe_unused__ void serializeRegs(int cpu_index, char *buffer, singl
         }
     }
     info_report("Writting 32 * %d vector registers to checkpoint memory",
-            cpu->cfg.vlen / 64);
+            cpu->cfg.vlenb / 64);
 
     // store csr regs
     buffer_offset = cpt_percpu_layout->csr_reg_cpt_addr;
