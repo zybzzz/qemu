@@ -18,7 +18,6 @@
 #include "tcg/tcg-op-common.h"
 #include "internal-target.h"
 #include "disas/disas.h"
-#include "internal.h"
 #include "tcg/tcg.h"
 #include <stdio.h>
 #include "checkpoint/checkpoint.h"

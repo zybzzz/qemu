@@ -271,10 +271,13 @@ static void prepare_bbl(qemu_plugin_id_t id, struct qemu_plugin_tb *tb) {
   sprintf(index_buf, "%ld%ld", pc, insns);
   uint64_t hash_key = atol(index_buf);
 
+  uint32_t *data = malloc(sizeof(uint32_t));
   // register callback when translation inst is nemu_trap
   for (size_t i = 0; i < insns; i++) {
     struct qemu_plugin_insn *insn = qemu_plugin_tb_get_insn(tb, i);
-    uint32_t *data = qemu_plugin_insn_data(insn);
+
+    uint32_t size = qemu_plugin_insn_data(insn, data, sizeof(uint32_t));
+    assert(size == sizeof(uint32_t) || size == sizeof(uint16_t));
     if (*data == 0x6b) {
       qemu_plugin_register_vcpu_insn_exec_cb(insn, nemu_trap_check,
                                              QEMU_PLUGIN_CB_NO_REGS, *data);
@@ -284,6 +287,7 @@ static void prepare_bbl(qemu_plugin_id_t id, struct qemu_plugin_tb *tb) {
     //   qemu_plugin_register_vcpu_insn_exec_cb(insn,instruction_check,QEMU_PLUGIN_CB_NO_REGS,*data);
     //}
   }
+  free(data);
 
   g_mutex_lock(&profiling_info.lock);
   // find exists bbv_info
