@@ -333,8 +333,15 @@ static void sync_init(NEMUState *ns, gint cpus){
     ns->sync_info.cpus = cpus;
     // store online cpu info, when cpu exec before workload, online[cpu_idx] = 1
     ns->sync_info.online = g_malloc0(cpus * sizeof(gint));
+
     // store online cpu nums
-    ns->sync_info.online_cpus = 0;
+    if(ns->nemu_args.checkpoint != NULL){
+        // if checkpoint mode, default online 2 cpud
+        ns->sync_info.online_cpus = cpus;
+    }else{
+        // if not, online cpus will add by before_worklod
+        ns->sync_info.online_cpus = 0;
+    }
 
     // set uniform next sync limit
     ns->sync_info.uniform_sync_limit = ns->nemu_args.sync_interval;
