@@ -54,10 +54,8 @@
 enum {
     UART0_IRQ = 10,
     RTC_IRQ = 11,
-    VIRTIO_IRQ = 1, /* 1 to 8 */
-    VIRTIO_COUNT = 8,
-    PCIE_IRQ = 0x20,            /* 32 to 35 */
-    VIRT_PLATFORM_BUS_IRQ = 64, /* 64 to 95 */
+    VIRTIO_IRQ = 1, /* From IRQ to (IRQ + COUNT - 1) */
+    VIRTIO_COUNT = 1,
 };
 
 enum {
@@ -65,6 +63,7 @@ enum {
     NEMU_PLIC,
     NEMU_CLINT,
     NEMU_UARTLITE,
+    NEMU_VIRTIO,
     NEMU_GCPT,
     NEMU_DRAM,
 };
@@ -85,6 +84,7 @@ enum {
 
 static const MemMapEntry nemu_memmap[] = {
     [NEMU_MROM] = { 0x1000, 0xf000 },
+    [NEMU_VIRTIO] = { 0x10001000, 0x1000 },
     [NEMU_PLIC] = { 0x3c000000, 0x4000000 },
     [NEMU_CLINT] = { 0x38000000, 0x10000 },
     [NEMU_UARTLITE] = { 0x40600000, 0x1000 },
@@ -559,8 +559,12 @@ static void nemu_machine_init(MachineState *machine)
     memory_region_add_subregion(system_memory, memmap[NEMU_UARTLITE].base,
                                 sysbus_mmio_get_region(SYS_BUS_DEVICE(dev), 0));
 
-    sysbus_connect_irq(SYS_BUS_DEVICE(dev), 0,
-                       qdev_get_gpio_in(DEVICE(s->irqchip[0]), UART0_IRQ));
+    /* VirtIO MMIO devices */
+    for (i = 0; i < VIRTIO_COUNT; i++) {
+        sysbus_create_simple("virtio-mmio",
+            memmap[NEMU_VIRTIO].base + i * memmap[NEMU_VIRTIO].size,
+            qdev_get_gpio_in(s->irqchip[0], VIRTIO_IRQ + i));
+    }
 
     simpoint_init(machine);
     nemu_load_firmware(machine);
