@@ -127,6 +127,7 @@ struct RISCVCPUConfig {
     bool ext_smepmp;
     bool rvv_ta_all_1s;
     bool rvv_ma_all_1s;
+    bool ext_matrix;
 
     uint32_t mvendorid;
     uint64_t marchid;
@@ -165,6 +166,8 @@ struct RISCVCPUConfig {
     uint16_t cbom_blocksize;
     uint16_t cbop_blocksize;
     uint16_t cboz_blocksize;
+    uint16_t mrowlen;
+    uint16_t datapath;
     bool mmu;
     bool pmp;
     bool debug;
